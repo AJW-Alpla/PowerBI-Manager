@@ -593,6 +593,7 @@
         let tokenExpiry = null;
         let currentWorkspaceId = null;
         let allUsers = [];
+        let allUsersById = new Map(); // O(1) lookup index for users by identifier
         let selectedUsers = new Set();
         let allWorkspaces = [];
         let pendingRoleChanges = new Map();
@@ -601,13 +602,19 @@
         let currentView = 'workspace';
         let selectedViewUser = null;
         let userWorkspaces = [];
+        let userWorkspacesById = new Map(); // O(1) lookup index for user workspaces
         let selectedWorkspacesForUser = new Set();
         let allWorkspacesCache = [];
         let searchTimeout = null;
+        let suggestionTimeout = null; // Debounce timeout for autocomplete
         let knownUsers = new Map(); // Cache of users seen across workspaces
         let workspaceUserMap = new Map(); // workspaceId -> users array (full cache)
         let userCacheBuilt = false; // Flag to track if full cache is ready
         let cacheBuildingPaused = false; // Pause cache building during write operations
+
+        // Reusable alert element for performance
+        let alertElement = null;
+        let alertTimeout = null;
 
 
         // Sign out
@@ -732,7 +739,7 @@
         async function buildUserCache() {
             if (userCacheBuilt || allWorkspacesCache.length === 0 || cacheBuildingPaused) return;
 
-            const BATCH_SIZE = 10; // Process 10 workspaces in parallel
+            const BATCH_SIZE = 15; // Process 15 workspaces in parallel for faster caching
             const total = allWorkspacesCache.length;
             let processed = 0;
 
@@ -866,6 +873,7 @@
                 // Check if we have cached data for this workspace
                 if (workspaceUserMap.has(currentWorkspaceId)) {
                     allUsers = workspaceUserMap.get(currentWorkspaceId);
+                    buildUserIndex();
                     renderUsers();
                     return;
                 }
@@ -874,6 +882,9 @@
                 const response = await apiCall(`https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users`);
                 const data = await response.json();
                 allUsers = data.value || [];
+
+                // Build O(1) lookup index
+                buildUserIndex();
 
                 // Update cache
                 workspaceUserMap.set(currentWorkspaceId, allUsers);
@@ -884,26 +895,36 @@
                 tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Error loading users</td></tr>';
             }
         }
+
+        // Build O(1) lookup index for users
+        function buildUserIndex() {
+            allUsersById.clear();
+            allUsers.forEach(user => allUsersById.set(user.identifier, user));
+        }
         
         function renderUsers() {
             const tbody = document.getElementById('userTableBody');
             tbody.innerHTML = '';
-            
+
             if (allUsers.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No users found</td></tr>';
                 return;
             }
-            
+
+            // Use DocumentFragment for batch DOM insertion
+            const fragment = document.createDocumentFragment();
+
             allUsers.forEach(user => {
                 const tr = document.createElement('tr');
                 const initials = getInitials(user.displayName || user.emailAddress);
                 const currentRole = user.groupUserAccessRight || 'Viewer';
                 const pendingRole = pendingRoleChanges.get(user.identifier);
                 const displayRole = pendingRole || currentRole;
-                
+                const escapedIdentifier = escapeHtml(user.identifier);
+
                 tr.innerHTML = `
                     <td class="checkbox-cell">
-                        <input type="checkbox" onchange="toggleUserSelection('${user.identifier}')"
+                        <input type="checkbox" data-action="toggle-user" data-identifier="${escapedIdentifier}"
                                ${selectedUsers.has(user.identifier) ? 'checked' : ''}>
                     </td>
                     <td>
@@ -922,20 +943,22 @@
                             ${['Admin', 'Member', 'Contributor', 'Viewer'].map(role => `
                                 <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
                                     <input type="radio" name="role-${user.identifier}" value="${role}"
-                                           ${displayRole === role ? 'checked' : ''}
-                                           onchange="stageRoleChange('${user.identifier}', '${role}')">
+                                           data-action="stage-role" data-identifier="${escapedIdentifier}" data-role="${role}"
+                                           ${displayRole === role ? 'checked' : ''}>
                                     <span style="font-size: 13px;">${role}</span>
                                 </label>
                             `).join('')}
                         </div>
                     </td>
                     <td>
-                        <button onclick="removeUser('${user.identifier}')" class="button-danger" 
+                        <button data-action="remove-user" data-identifier="${escapedIdentifier}" class="button-danger"
                                 style="padding: 6px 12px; font-size: 13px;">🗑️</button>
                     </td>
                 `;
-                tbody.appendChild(tr);
+                fragment.appendChild(tr);
             });
+
+            tbody.appendChild(fragment);
         }
         
         function toggleUserSelection(identifier) {
@@ -970,38 +993,45 @@
         
         async function bulkSetRole(newRole) {
             if (selectedUsers.size === 0) return;
-            
+
             if (!confirm(`Set role to ${newRole} for ${selectedUsers.size} user(s)?`)) return;
-            
-            let successCount = 0;
-            
+
+            // Build payloads using O(1) Map lookup
+            const payloads = [];
             for (const identifier of selectedUsers) {
-                const user = allUsers.find(u => u.identifier === identifier);
+                const user = allUsersById.get(identifier);
                 if (!user) continue;
-                
-                try {
-                    const payload = {
-                        groupUserAccessRight: newRole,
-                        principalType: user.principalType || 'User',
-                        identifier: user.identifier,
-                        emailAddress: user.emailAddress || user.identifier
-                    };
-                    
-                    const response = await apiCall(
-                        `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users`,
-                        { method: 'PUT', body: JSON.stringify(payload) }
-                    );
-                    
-                    if (response.ok) successCount++;
-                    await sleep(500);
-                } catch (error) {
-                    console.error('Error:', error);
+                payloads.push({
+                    groupUserAccessRight: newRole,
+                    principalType: user.principalType || 'User',
+                    identifier: user.identifier,
+                    emailAddress: user.emailAddress || user.identifier
+                });
+            }
+
+            // Process in parallel batches
+            const BATCH_SIZE = 5;
+            let successCount = 0;
+
+            for (let i = 0; i < payloads.length; i += BATCH_SIZE) {
+                const batch = payloads.slice(i, i + BATCH_SIZE);
+                const results = await Promise.allSettled(
+                    batch.map(payload =>
+                        apiCall(
+                            `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users`,
+                            { method: 'PUT', body: JSON.stringify(payload) }
+                        )
+                    )
+                );
+                successCount += results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+
+                if (i + BATCH_SIZE < payloads.length) {
+                    await sleep(200);
                 }
             }
-            
+
             selectedUsers.clear();
             updateWorkspaceBulkActions();
-            // Invalidate cache for this workspace
             workspaceUserMap.delete(currentWorkspaceId);
             showAlert(`Changed ${successCount} role(s) to ${newRole}`, 'success');
             await loadWorkspaceUsers();
@@ -1009,46 +1039,52 @@
 
         async function bulkRemoveUsers() {
             if (selectedUsers.size === 0) return;
-            
+
             if (!confirm(`Remove ${selectedUsers.size} user(s) from this workspace?`)) return;
-            
+
+            const identifiers = Array.from(selectedUsers);
+            const BATCH_SIZE = 5;
             let successCount = 0;
-            
-            for (const identifier of selectedUsers) {
-                try {
-                    const response = await apiCall(
-                        `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users/${encodeURIComponent(identifier)}`,
-                        { method: 'DELETE' }
-                    );
-                    
-                    if (response.ok) successCount++;
-                    await sleep(500);
-                } catch (error) {
-                    console.error('Error:', error);
+
+            // Process in parallel batches
+            for (let i = 0; i < identifiers.length; i += BATCH_SIZE) {
+                const batch = identifiers.slice(i, i + BATCH_SIZE);
+                const results = await Promise.allSettled(
+                    batch.map(identifier =>
+                        apiCall(
+                            `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users/${encodeURIComponent(identifier)}`,
+                            { method: 'DELETE' }
+                        )
+                    )
+                );
+                successCount += results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+
+                if (i + BATCH_SIZE < identifiers.length) {
+                    await sleep(200);
                 }
             }
-            
+
             selectedUsers.clear();
             updateWorkspaceBulkActions();
-            // Pause cache building during update
             cacheBuildingPaused = true;
             workspaceUserMap.delete(currentWorkspaceId);
             showAlert(`Removed ${successCount} user(s)`, 'success');
             await loadWorkspaceUsers();
-            rebuildKnownUsersCache();
+            updateKnownUsersCacheForWorkspace(currentWorkspaceId, allUsers);
             cacheBuildingPaused = false;
         }
 
         function stageRoleChange(identifier, newRole) {
-            const user = allUsers.find(u => u.identifier === identifier);
+            const user = allUsersById.get(identifier);
+            if (!user) return;
             const currentRole = user.groupUserAccessRight || 'Viewer';
-            
+
             if (newRole === currentRole) {
                 pendingRoleChanges.delete(identifier);
             } else {
                 pendingRoleChanges.set(identifier, newRole);
             }
-            
+
             updatePendingChangesUI();
             renderUsers();
         }
@@ -1056,23 +1092,23 @@
         function updatePendingChangesUI() {
             const container = document.getElementById('pendingChangesContainer');
             const count = pendingRoleChanges.size;
-            
+
             if (count > 0) {
                 container.style.display = 'block';
                 document.getElementById('pendingChangesCount').textContent = count;
-                
-                let html = '';
+
+                const htmlParts = [];
                 pendingRoleChanges.forEach((newRole, identifier) => {
-                    const user = allUsers.find(u => u.identifier === identifier);
+                    const user = allUsersById.get(identifier);
                     if (user) {
                         const currentRole = user.groupUserAccessRight || 'Viewer';
-                        html += `<div style="padding: 8px 0; border-bottom: 1px solid #f0f0f0;">
-                            <strong>${escapeHtml(user.displayName || user.emailAddress)}</strong>: 
+                        htmlParts.push(`<div style="padding: 8px 0; border-bottom: 1px solid #f0f0f0;">
+                            <strong>${escapeHtml(user.displayName || user.emailAddress)}</strong>:
                             ${currentRole} → <span style="color: #ff6b00; font-weight: 600;">${newRole}</span>
-                        </div>`;
+                        </div>`);
                     }
                 });
-                document.getElementById('pendingChangesList').innerHTML = html;
+                document.getElementById('pendingChangesList').innerHTML = htmlParts.join('');
             } else {
                 container.style.display = 'none';
             }
@@ -1080,38 +1116,45 @@
         
         async function applyPendingRoleChanges() {
             if (pendingRoleChanges.size === 0) return;
-            
+
             if (!confirm(`Apply ${pendingRoleChanges.size} role change(s)?`)) return;
-            
-            let successCount = 0;
-            
+
+            // Build payloads using O(1) Map lookup
+            const payloads = [];
             for (const [identifier, newRole] of pendingRoleChanges.entries()) {
-                const user = allUsers.find(u => u.identifier === identifier);
+                const user = allUsersById.get(identifier);
                 if (!user) continue;
-                
-                try {
-                    const payload = {
-                        groupUserAccessRight: newRole,
-                        principalType: user.principalType || 'User',
-                        identifier: user.identifier,
-                        emailAddress: user.emailAddress || user.identifier
-                    };
-                    
-                    const response = await apiCall(
-                        `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users`,
-                        { method: 'PUT', body: JSON.stringify(payload) }
-                    );
-                    
-                    if (response.ok) successCount++;
-                    await sleep(500);
-                } catch (error) {
-                    console.error('Error:', error);
+                payloads.push({
+                    groupUserAccessRight: newRole,
+                    principalType: user.principalType || 'User',
+                    identifier: user.identifier,
+                    emailAddress: user.emailAddress || user.identifier
+                });
+            }
+
+            // Process in parallel batches
+            const BATCH_SIZE = 5;
+            let successCount = 0;
+
+            for (let i = 0; i < payloads.length; i += BATCH_SIZE) {
+                const batch = payloads.slice(i, i + BATCH_SIZE);
+                const results = await Promise.allSettled(
+                    batch.map(payload =>
+                        apiCall(
+                            `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users`,
+                            { method: 'PUT', body: JSON.stringify(payload) }
+                        )
+                    )
+                );
+                successCount += results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+
+                if (i + BATCH_SIZE < payloads.length) {
+                    await sleep(200);
                 }
             }
-            
+
             pendingRoleChanges.clear();
             updatePendingChangesUI();
-            // Pause cache building during update
             cacheBuildingPaused = true;
             workspaceUserMap.delete(currentWorkspaceId);
             showAlert(`Applied ${successCount} change(s)`, 'success');
@@ -1139,50 +1182,55 @@
             document.getElementById('addUserSuggestions').style.display = 'none';
         }
 
+        // Add user suggestions with debouncing
+        let addUserSuggestionTimeout = null;
         function showAddUserSuggestions() {
-            const input = document.getElementById('newUserEmail');
-            const dropdown = document.getElementById('addUserSuggestions');
-            const searchTerm = input.value.trim().toLowerCase();
+            clearTimeout(addUserSuggestionTimeout);
+            addUserSuggestionTimeout = setTimeout(() => {
+                const input = document.getElementById('newUserEmail');
+                const dropdown = document.getElementById('addUserSuggestions');
+                const searchTerm = input.value.trim().toLowerCase();
 
-            if (searchTerm.length === 0 || knownUsers.size === 0) {
-                dropdown.style.display = 'none';
-                return;
-            }
+                if (searchTerm.length === 0 || knownUsers.size === 0) {
+                    dropdown.style.display = 'none';
+                    return;
+                }
 
-            const matches = Array.from(knownUsers.values())
-                .filter(user =>
-                    (user.displayName && user.displayName.toLowerCase().includes(searchTerm)) ||
-                    (user.email && user.email.toLowerCase().includes(searchTerm))
-                )
-                .slice(0, 10);
+                const matches = Array.from(knownUsers.values())
+                    .filter(user =>
+                        (user.displayName && user.displayName.toLowerCase().includes(searchTerm)) ||
+                        (user.email && user.email.toLowerCase().includes(searchTerm))
+                    )
+                    .slice(0, 10);
 
-            if (matches.length === 0) {
-                dropdown.style.display = 'none';
-                return;
-            }
+                if (matches.length === 0) {
+                    dropdown.style.display = 'none';
+                    return;
+                }
 
-            dropdown.innerHTML = matches.map(user => {
-                const isGroup = user.principalType === 'Group';
-                const avatarStyle = isGroup
-                    ? 'background: linear-gradient(135deg, #28a745 0%, #20c997 100%);'
-                    : '';
-                const avatarContent = isGroup ? '👥' : getInitials(user.displayName);
-                const typeLabel = isGroup
-                    ? '<span style="background: #d4edda; color: #155724; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 8px;">Group</span>'
-                    : '';
+                dropdown.innerHTML = matches.map(user => {
+                    const isGroup = user.principalType === 'Group';
+                    const avatarStyle = isGroup
+                        ? 'background: linear-gradient(135deg, #28a745 0%, #20c997 100%);'
+                        : '';
+                    const avatarContent = isGroup ? '👥' : getInitials(user.displayName);
+                    const typeLabel = isGroup
+                        ? '<span style="background: #d4edda; color: #155724; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 8px;">Group</span>'
+                        : '';
 
-                return `
-                    <div class="user-search-item" onclick="selectAddUserSuggestion('${escapeHtml(user.email || user.identifier)}', '${user.principalType || 'User'}')">
-                        <div class="user-avatar" style="${avatarStyle}">${avatarContent}</div>
-                        <div style="flex: 1;">
-                            <div style="font-weight: 600;">${escapeHtml(user.displayName)}${typeLabel}</div>
-                            <div style="font-size: 11px; color: #666;">${escapeHtml(user.email || user.identifier)}</div>
+                    return `
+                        <div class="user-search-item" onclick="selectAddUserSuggestion('${escapeHtml(user.email || user.identifier)}', '${user.principalType || 'User'}')">
+                            <div class="user-avatar" style="${avatarStyle}">${avatarContent}</div>
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600;">${escapeHtml(user.displayName)}${typeLabel}</div>
+                                <div style="font-size: 11px; color: #666;">${escapeHtml(user.email || user.identifier)}</div>
+                            </div>
                         </div>
-                    </div>
-                `;
-            }).join('');
+                    `;
+                }).join('');
 
-            dropdown.style.display = 'block';
+                dropdown.style.display = 'block';
+            }, 150);
         }
 
         function selectAddUserSuggestion(identifier, principalType) {
@@ -1232,8 +1280,8 @@
         }
 
         async function removeUser(identifier) {
-            const user = allUsers.find(u => u.identifier === identifier);
-            if (!confirm(`Remove ${user.displayName || user.emailAddress}?`)) return;
+            const user = allUsersById.get(identifier);
+            if (!user || !confirm(`Remove ${user.displayName || user.emailAddress}?`)) return;
 
             try {
                 const response = await apiCall(
@@ -1243,11 +1291,10 @@
 
                 if (response.ok) {
                     showAlert('User removed', 'success');
-                    // Pause cache building during update
                     cacheBuildingPaused = true;
                     workspaceUserMap.delete(currentWorkspaceId);
                     await loadWorkspaceUsers();
-                    rebuildKnownUsersCache();
+                    updateKnownUsersCacheForWorkspace(currentWorkspaceId, allUsers);
                     cacheBuildingPaused = false;
                 }
             } catch (error) {
@@ -1427,6 +1474,9 @@
                     await loadUserWorkspacesParallel();
                 }
 
+                // Build O(1) lookup index for user workspaces
+                buildUserWorkspacesIndex();
+
                 document.getElementById('workspaceCount').textContent = userWorkspaces.length;
                 document.getElementById('userWorkspacesContainer').style.display = 'block';
                 renderUserWorkspaces();
@@ -1439,7 +1489,7 @@
 
         // Parallel loading fallback when cache isn't ready
         async function loadUserWorkspacesParallel() {
-            const BATCH_SIZE = 10;
+            const BATCH_SIZE = 15;
             const total = allWorkspacesCache.length;
 
             for (let i = 0; i < total; i += BATCH_SIZE) {
@@ -1508,37 +1558,48 @@
             }
         }
         
+        // Build O(1) lookup index for user workspaces
+        function buildUserWorkspacesIndex() {
+            userWorkspacesById.clear();
+            userWorkspaces.forEach(ws => userWorkspacesById.set(ws.id, ws));
+        }
+
         function renderUserWorkspaces() {
             const tbody = document.getElementById('userWorkspacesTable');
             tbody.innerHTML = '';
-            
+
             if (userWorkspaces.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No workspace access found</td></tr>';
                 return;
             }
-            
+
+            // Use DocumentFragment for batch DOM insertion
+            const fragment = document.createDocumentFragment();
+
             userWorkspaces.forEach(ws => {
                 const tr = document.createElement('tr');
                 const isSelected = selectedWorkspacesForUser.has(ws.id);
-                
+                const escapedId = escapeHtml(ws.id);
+
                 tr.innerHTML = `
                     <td class="checkbox-cell">
-                        <input type="checkbox" onchange="toggleWorkspaceSelection('${ws.id}')" 
+                        <input type="checkbox" data-action="toggle-workspace" data-workspace-id="${escapedId}"
                                ${isSelected ? 'checked' : ''}>
                     </td>
                     <td><strong>${escapeHtml(ws.name)}</strong></td>
                     <td><span class="role-badge role-${ws.userRole.toLowerCase()}">${ws.userRole}</span></td>
                     <td>${ws.type}</td>
                     <td>
-                        <button onclick="changeUserWorkspaceRole('${ws.id}')" 
+                        <button data-action="change-workspace-role" data-workspace-id="${escapedId}"
                                 style="background: #17a2b8; padding: 6px 12px;">✏️ Change</button>
-                        <button onclick="removeUserFromWorkspace('${ws.id}')" class="button-danger" 
+                        <button data-action="remove-from-workspace" data-workspace-id="${escapedId}" class="button-danger"
                                 style="padding: 6px 12px;">🗑️</button>
                     </td>
                 `;
-                tbody.appendChild(tr);
+                fragment.appendChild(tr);
             });
-            
+
+            tbody.appendChild(fragment);
             updateUserBulkActions();
         }
         
@@ -1572,7 +1633,8 @@
         }
         
         async function changeUserWorkspaceRole(workspaceId) {
-            const workspace = userWorkspaces.find(w => w.id === workspaceId);
+            const workspace = userWorkspacesById.get(workspaceId);
+            if (!workspace) return;
             const newRole = prompt(`Change role from ${workspace.userRole} to:\nEnter: Admin, Member, Contributor, or Viewer`, workspace.userRole);
 
             if (!newRole || newRole === workspace.userRole) return;
@@ -1590,7 +1652,6 @@
                 identifier: selectedViewUser.id
             };
 
-            // For users, also include emailAddress
             if (!isGroup && selectedViewUser.email) {
                 requestBody.emailAddress = selectedViewUser.email;
             }
@@ -1606,7 +1667,6 @@
 
                 if (response.ok) {
                     showAlert(`Role changed to ${newRole}`, 'success');
-                    // Invalidate cache for this workspace
                     workspaceUserMap.delete(workspaceId);
                     await loadUserWorkspaces();
                 }
@@ -1616,11 +1676,11 @@
         }
 
         async function removeUserFromWorkspace(workspaceId) {
-            const workspace = userWorkspaces.find(w => w.id === workspaceId);
+            const workspace = userWorkspacesById.get(workspaceId);
+            if (!workspace) return;
 
             if (!confirm(`Remove ${selectedViewUser.displayName} from "${workspace.name}"?`)) return;
 
-            // For groups, use identifier; for users, use email or id
             const userIdentifier = selectedViewUser.id;
 
             try {
@@ -1628,14 +1688,13 @@
                     `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users/${encodeURIComponent(userIdentifier)}`,
                     { method: 'DELETE' }
                 );
-                
+
                 if (response.ok) {
                     showAlert('Removed from workspace', 'success');
-                    // Pause cache building during update
                     cacheBuildingPaused = true;
                     workspaceUserMap.delete(workspaceId);
                     await loadUserWorkspaces();
-                    rebuildKnownUsersCache();
+                    updateKnownUsersCacheForWorkspace(workspaceId, workspaceUserMap.get(workspaceId) || []);
                     cacheBuildingPaused = false;
                 }
             } catch (error) {
@@ -1752,42 +1811,44 @@
 
             if (!confirm(`Change role to ${newRole} for ${selectedWorkspacesForUser.size} workspace(s)?`)) return;
 
-            let successCount = 0;
             const isGroup = selectedViewUser.principalType === 'Group';
+            const workspaceIds = Array.from(selectedWorkspacesForUser);
 
-            for (const workspaceId of selectedWorkspacesForUser) {
-                try {
-                    const requestBody = {
-                        groupUserAccessRight: newRole,
-                        principalType: selectedViewUser.principalType || 'User',
-                        identifier: selectedViewUser.id
-                    };
+            // Build request body once (same for all workspaces)
+            const requestBody = {
+                groupUserAccessRight: newRole,
+                principalType: selectedViewUser.principalType || 'User',
+                identifier: selectedViewUser.id
+            };
+            if (!isGroup && selectedViewUser.email) {
+                requestBody.emailAddress = selectedViewUser.email;
+            }
+            const bodyStr = JSON.stringify(requestBody);
 
-                    // For users, also include emailAddress
-                    if (!isGroup && selectedViewUser.email) {
-                        requestBody.emailAddress = selectedViewUser.email;
-                    }
+            // Process in parallel batches
+            const BATCH_SIZE = 5;
+            let successCount = 0;
 
-                    const response = await apiCall(
-                        `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`,
-                        {
-                            method: 'PUT',
-                            body: JSON.stringify(requestBody)
-                        }
-                    );
+            for (let i = 0; i < workspaceIds.length; i += BATCH_SIZE) {
+                const batch = workspaceIds.slice(i, i + BATCH_SIZE);
+                const results = await Promise.allSettled(
+                    batch.map(workspaceId =>
+                        apiCall(
+                            `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`,
+                            { method: 'PUT', body: bodyStr }
+                        ).then(response => {
+                            if (response.ok) workspaceUserMap.delete(workspaceId);
+                            return response;
+                        })
+                    )
+                );
+                successCount += results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
 
-                    if (response.ok) {
-                        successCount++;
-                        // Invalidate cache for this workspace
-                        workspaceUserMap.delete(workspaceId);
-                    }
-                    await sleep(500);
-                } catch (error) {
-                    console.error('Error:', error);
+                if (i + BATCH_SIZE < workspaceIds.length) {
+                    await sleep(200);
                 }
             }
 
-            // Pause cache building during update
             cacheBuildingPaused = true;
             showAlert(`Changed ${successCount} roles`, 'success');
             selectedWorkspacesForUser.clear();
@@ -1800,29 +1861,32 @@
 
             if (!confirm(`Remove ${selectedViewUser.displayName} from ${selectedWorkspacesForUser.size} workspace(s)?`)) return;
 
-            let successCount = 0;
-            // For groups, use identifier; for users, use email
             const userIdentifier = selectedViewUser.id;
+            const workspaceIds = Array.from(selectedWorkspacesForUser);
+            const BATCH_SIZE = 5;
+            let successCount = 0;
 
-            for (const workspaceId of selectedWorkspacesForUser) {
-                try {
-                    const response = await apiCall(
-                        `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users/${encodeURIComponent(userIdentifier)}`,
-                        { method: 'DELETE' }
-                    );
+            // Process in parallel batches
+            for (let i = 0; i < workspaceIds.length; i += BATCH_SIZE) {
+                const batch = workspaceIds.slice(i, i + BATCH_SIZE);
+                const results = await Promise.allSettled(
+                    batch.map(workspaceId =>
+                        apiCall(
+                            `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users/${encodeURIComponent(userIdentifier)}`,
+                            { method: 'DELETE' }
+                        ).then(response => {
+                            if (response.ok) workspaceUserMap.delete(workspaceId);
+                            return response;
+                        })
+                    )
+                );
+                successCount += results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
 
-                    if (response.ok) {
-                        successCount++;
-                        // Invalidate cache for this workspace
-                        workspaceUserMap.delete(workspaceId);
-                    }
-                    await sleep(500);
-                } catch (error) {
-                    console.error('Error:', error);
+                if (i + BATCH_SIZE < workspaceIds.length) {
+                    await sleep(200);
                 }
             }
 
-            // Pause cache building during update
             cacheBuildingPaused = true;
             showAlert(`Removed from ${successCount} workspace(s)`, 'success');
             selectedWorkspacesForUser.clear();
@@ -1861,12 +1925,24 @@
         }
         
         function showAlert(message, type = 'info') {
-            const alert = document.createElement('div');
-            alert.className = `alert ${type}`;
-            alert.textContent = message;
-            document.body.appendChild(alert);
-            
-            setTimeout(() => alert.remove(), 4000);
+            // Reuse existing alert element for performance
+            if (!alertElement) {
+                alertElement = document.createElement('div');
+                document.body.appendChild(alertElement);
+            }
+
+            // Clear any pending hide timeout
+            if (alertTimeout) {
+                clearTimeout(alertTimeout);
+            }
+
+            alertElement.className = `alert ${type}`;
+            alertElement.textContent = message;
+            alertElement.style.display = 'block';
+
+            alertTimeout = setTimeout(() => {
+                alertElement.style.display = 'none';
+            }, 4000);
         }
         
         function escapeHtml(text) {
@@ -1885,37 +1961,41 @@
             return new Promise(resolve => setTimeout(resolve, ms));
         }
 
-        // WORKSPACE SUGGESTIONS
+        // WORKSPACE SUGGESTIONS (with debouncing)
+        let workspaceSuggestionTimeout = null;
         function showWorkspaceSuggestions() {
-            const input = document.getElementById('workspaceSearch');
-            const dropdown = document.getElementById('workspaceSuggestions');
-            const searchTerm = input.value.trim().toLowerCase();
+            clearTimeout(workspaceSuggestionTimeout);
+            workspaceSuggestionTimeout = setTimeout(() => {
+                const input = document.getElementById('workspaceSearch');
+                const dropdown = document.getElementById('workspaceSuggestions');
+                const searchTerm = input.value.trim().toLowerCase();
 
-            if (searchTerm.length === 0 || allWorkspaces.length === 0) {
-                dropdown.style.display = 'none';
-                return;
-            }
+                if (searchTerm.length === 0 || allWorkspaces.length === 0) {
+                    dropdown.style.display = 'none';
+                    return;
+                }
 
-            const matches = allWorkspaces
-                .filter(ws => ws.name.toLowerCase().includes(searchTerm))
-                .slice(0, 10);
+                const matches = allWorkspaces
+                    .filter(ws => ws.name.toLowerCase().includes(searchTerm))
+                    .slice(0, 10);
 
-            if (matches.length === 0) {
-                dropdown.style.display = 'none';
-                return;
-            }
+                if (matches.length === 0) {
+                    dropdown.style.display = 'none';
+                    return;
+                }
 
-            dropdown.innerHTML = matches.map(ws => `
-                <div class="user-search-item" onclick="selectWorkspaceSuggestion('${ws.id}')">
-                    <div style="width: 32px; height: 32px; border-radius: 6px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">📁</div>
-                    <div style="flex: 1;">
-                        <div style="font-weight: 600;">${escapeHtml(ws.name)}</div>
-                        <div style="font-size: 11px; color: #666;">${ws.type || 'Workspace'}</div>
+                dropdown.innerHTML = matches.map(ws => `
+                    <div class="user-search-item" onclick="selectWorkspaceSuggestion('${ws.id}')">
+                        <div style="width: 32px; height: 32px; border-radius: 6px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">📁</div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600;">${escapeHtml(ws.name)}</div>
+                            <div style="font-size: 11px; color: #666;">${ws.type || 'Workspace'}</div>
+                        </div>
                     </div>
-                </div>
-            `).join('');
+                `).join('');
 
-            dropdown.style.display = 'block';
+                dropdown.style.display = 'block';
+            }, 150);
         }
 
         function hideWorkspaceSuggestions() {
@@ -1933,51 +2013,55 @@
             }
         }
 
-        // USER SUGGESTIONS (includes Groups)
+        // USER SUGGESTIONS (includes Groups, with debouncing)
+        let userSuggestionTimeout = null;
         function showUserSuggestions() {
-            const input = document.getElementById('userViewEmailInput');
-            const dropdown = document.getElementById('userSuggestions');
-            const searchTerm = input.value.trim().toLowerCase();
+            clearTimeout(userSuggestionTimeout);
+            userSuggestionTimeout = setTimeout(() => {
+                const input = document.getElementById('userViewEmailInput');
+                const dropdown = document.getElementById('userSuggestions');
+                const searchTerm = input.value.trim().toLowerCase();
 
-            if (searchTerm.length === 0 || knownUsers.size === 0) {
-                dropdown.style.display = 'none';
-                return;
-            }
+                if (searchTerm.length === 0 || knownUsers.size === 0) {
+                    dropdown.style.display = 'none';
+                    return;
+                }
 
-            const matches = Array.from(knownUsers.values())
-                .filter(user =>
-                    (user.displayName && user.displayName.toLowerCase().includes(searchTerm)) ||
-                    (user.email && user.email.toLowerCase().includes(searchTerm))
-                )
-                .slice(0, 25);
+                const matches = Array.from(knownUsers.values())
+                    .filter(user =>
+                        (user.displayName && user.displayName.toLowerCase().includes(searchTerm)) ||
+                        (user.email && user.email.toLowerCase().includes(searchTerm))
+                    )
+                    .slice(0, 25);
 
-            if (matches.length === 0) {
-                dropdown.style.display = 'none';
-                return;
-            }
+                if (matches.length === 0) {
+                    dropdown.style.display = 'none';
+                    return;
+                }
 
-            dropdown.innerHTML = matches.map(user => {
-                const isGroup = user.principalType === 'Group';
-                const avatarStyle = isGroup
-                    ? 'background: linear-gradient(135deg, #28a745 0%, #20c997 100%);'
-                    : '';
-                const avatarContent = isGroup ? '👥' : getInitials(user.displayName);
-                const typeLabel = isGroup
-                    ? '<span style="background: #d4edda; color: #155724; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 8px;">Group</span>'
-                    : '';
+                dropdown.innerHTML = matches.map(user => {
+                    const isGroup = user.principalType === 'Group';
+                    const avatarStyle = isGroup
+                        ? 'background: linear-gradient(135deg, #28a745 0%, #20c997 100%);'
+                        : '';
+                    const avatarContent = isGroup ? '👥' : getInitials(user.displayName);
+                    const typeLabel = isGroup
+                        ? '<span style="background: #d4edda; color: #155724; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 8px;">Group</span>'
+                        : '';
 
-                return `
-                    <div class="user-search-item" onclick="selectUserSuggestion('${escapeHtml(user.email)}', '${user.principalType || 'User'}', '${escapeHtml(user.displayName)}')">
-                        <div class="user-avatar" style="${avatarStyle}">${avatarContent}</div>
-                        <div style="flex: 1;">
-                            <div style="font-weight: 600;">${escapeHtml(user.displayName)}${typeLabel}</div>
-                            <div style="font-size: 11px; color: #666;">${escapeHtml(user.email)}</div>
+                    return `
+                        <div class="user-search-item" onclick="selectUserSuggestion('${escapeHtml(user.email)}', '${user.principalType || 'User'}', '${escapeHtml(user.displayName)}')">
+                            <div class="user-avatar" style="${avatarStyle}">${avatarContent}</div>
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600;">${escapeHtml(user.displayName)}${typeLabel}</div>
+                                <div style="font-size: 11px; color: #666;">${escapeHtml(user.email)}</div>
+                            </div>
                         </div>
-                    </div>
-                `;
-            }).join('');
+                    `;
+                }).join('');
 
-            dropdown.style.display = 'block';
+                dropdown.style.display = 'block';
+            }, 150);
         }
 
         function hideUserSuggestions() {
@@ -2031,6 +2115,61 @@
             });
         }
 
+        // Optimized: Update cache for only the affected workspace instead of full rebuild
+        function updateKnownUsersCacheForWorkspace(workspaceId, users) {
+            // Get current users in this workspace from cache (before update)
+            const oldUsers = workspaceUserMap.get(workspaceId) || [];
+
+            // Build set of identifiers that were in this workspace
+            const oldIdentifiers = new Set();
+            oldUsers.forEach(user => {
+                const email = user.emailAddress || user.identifier;
+                if (email && email.includes('@')) {
+                    oldIdentifiers.add(email.toLowerCase());
+                }
+                if (user.principalType === 'Group' && user.displayName) {
+                    oldIdentifiers.add(`group:${user.identifier}`.toLowerCase());
+                }
+            });
+
+            // Build set of identifiers now in this workspace
+            const newIdentifiers = new Set();
+            users.forEach(user => {
+                const email = user.emailAddress || user.identifier;
+                if (email && email.includes('@')) {
+                    newIdentifiers.add(email.toLowerCase());
+                }
+                if (user.principalType === 'Group' && user.displayName) {
+                    newIdentifiers.add(`group:${user.identifier}`.toLowerCase());
+                }
+            });
+
+            // Find removed users (in old but not in new)
+            oldIdentifiers.forEach(id => {
+                if (!newIdentifiers.has(id)) {
+                    // Check if this user exists in any other workspace before removing
+                    let existsElsewhere = false;
+                    workspaceUserMap.forEach((wsUsers, wsId) => {
+                        if (wsId !== workspaceId) {
+                            wsUsers.forEach(u => {
+                                const email = u.emailAddress || u.identifier;
+                                const key = u.principalType === 'Group'
+                                    ? `group:${u.identifier}`.toLowerCase()
+                                    : (email && email.includes('@') ? email.toLowerCase() : null);
+                                if (key === id) existsElsewhere = true;
+                            });
+                        }
+                    });
+                    if (!existsElsewhere) {
+                        knownUsers.delete(id);
+                    }
+                }
+            });
+
+            // Add new users to cache
+            cacheUsersFromWorkspace(users);
+        }
+
         // Close dropdowns when clicking outside
         document.addEventListener('click', (e) => {
             if (!e.target.closest('#workspaceSearch') && !e.target.closest('#workspaceSuggestions')) {
@@ -2041,6 +2180,52 @@
             }
             if (!e.target.closest('#newUserEmail') && !e.target.closest('#addUserSuggestions')) {
                 document.getElementById('addUserSuggestions').style.display = 'none';
+            }
+        });
+
+        // Event delegation for user table (workspace view)
+        document.getElementById('userTableBody').addEventListener('click', (e) => {
+            const target = e.target;
+            const action = target.dataset.action;
+            const identifier = target.dataset.identifier;
+
+            if (action === 'remove-user' && identifier) {
+                removeUser(identifier);
+            }
+        });
+
+        document.getElementById('userTableBody').addEventListener('change', (e) => {
+            const target = e.target;
+            const action = target.dataset.action;
+            const identifier = target.dataset.identifier;
+
+            if (action === 'toggle-user' && identifier) {
+                toggleUserSelection(identifier);
+            } else if (action === 'stage-role' && identifier) {
+                stageRoleChange(identifier, target.dataset.role);
+            }
+        });
+
+        // Event delegation for user workspaces table (user view)
+        document.getElementById('userWorkspacesTable').addEventListener('click', (e) => {
+            const target = e.target;
+            const action = target.dataset.action;
+            const workspaceId = target.dataset.workspaceId;
+
+            if (action === 'change-workspace-role' && workspaceId) {
+                changeUserWorkspaceRole(workspaceId);
+            } else if (action === 'remove-from-workspace' && workspaceId) {
+                removeUserFromWorkspace(workspaceId);
+            }
+        });
+
+        document.getElementById('userWorkspacesTable').addEventListener('change', (e) => {
+            const target = e.target;
+            const action = target.dataset.action;
+            const workspaceId = target.dataset.workspaceId;
+
+            if (action === 'toggle-workspace' && workspaceId) {
+                toggleWorkspaceSelection(workspaceId);
             }
         });
 
