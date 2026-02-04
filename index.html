@@ -1052,19 +1052,46 @@
             const identifiers = Array.from(selectedUsers);
             const BATCH_SIZE = 5;
             let successCount = 0;
+            let failureCount = 0;
+            const errors = [];
 
             // Process in parallel batches
             for (let i = 0; i < identifiers.length; i += BATCH_SIZE) {
                 const batch = identifiers.slice(i, i + BATCH_SIZE);
                 const results = await Promise.allSettled(
-                    batch.map(identifier =>
+                    batch.map((identifier, idx) =>
                         apiCall(
                             `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users/${encodeURIComponent(identifier)}`,
                             { method: 'DELETE' }
-                        )
+                        ).then(async response => {
+                            if (response.ok) {
+                                return { success: true, identifier };
+                            } else {
+                                const errorText = await response.text().catch(() => 'Unknown error');
+                                return { success: false, identifier, error: errorText };
+                            }
+                        })
                     )
                 );
-                successCount += results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+
+                // Collect successes and failures
+                results.forEach((result, idx) => {
+                    if (result.status === 'fulfilled') {
+                        if (result.value.success) {
+                            successCount++;
+                        } else {
+                            failureCount++;
+                            const user = allUsersById.get(batch[idx]);
+                            const userName = user ? (user.displayName || user.emailAddress) : batch[idx];
+                            errors.push(`${userName}: ${result.value.error}`);
+                        }
+                    } else {
+                        failureCount++;
+                        const user = allUsersById.get(batch[idx]);
+                        const userName = user ? (user.displayName || user.emailAddress) : batch[idx];
+                        errors.push(`${userName}: ${result.reason.message || 'Network error'}`);
+                    }
+                });
 
                 if (i + BATCH_SIZE < identifiers.length) {
                     await sleep(200);
@@ -1075,7 +1102,21 @@
             updateWorkspaceBulkActions();
             cacheBuildingPaused = true;
             workspaceUserMap.delete(currentWorkspaceId);
-            showAlert(`Removed ${successCount} user(s)`, 'success');
+
+            // Show comprehensive feedback
+            if (failureCount === 0) {
+                showAlert(`✓ Successfully removed ${successCount} user(s)`, 'success');
+            } else if (successCount === 0) {
+                showAlert(`✗ Failed to remove all ${failureCount} user(s). ${errors[0]}`, 'error');
+            } else {
+                showAlert(`⚠ Partially completed: ${successCount} removed, ${failureCount} failed. First error: ${errors[0]}`, 'error');
+            }
+
+            // Log all errors to console for debugging
+            if (errors.length > 0) {
+                console.error('Remove users errors:', errors);
+            }
+
             await loadWorkspaceUsers();
             updateKnownUsersCacheForWorkspace(currentWorkspaceId, allUsers);
             cacheBuildingPaused = false;
@@ -1135,13 +1176,16 @@
                     groupUserAccessRight: newRole,
                     principalType: user.principalType || 'User',
                     identifier: user.identifier,
-                    emailAddress: user.emailAddress || user.identifier
+                    emailAddress: user.emailAddress || user.identifier,
+                    _userName: user.displayName || user.emailAddress
                 });
             }
 
             // Process in parallel batches
             const BATCH_SIZE = 5;
             let successCount = 0;
+            let failureCount = 0;
+            const errors = [];
 
             for (let i = 0; i < payloads.length; i += BATCH_SIZE) {
                 const batch = payloads.slice(i, i + BATCH_SIZE);
@@ -1150,10 +1194,31 @@
                         apiCall(
                             `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users`,
                             { method: 'PUT', body: JSON.stringify(payload) }
-                        )
+                        ).then(async response => {
+                            if (response.ok) {
+                                return { success: true, userName: payload._userName };
+                            } else {
+                                const errorText = await response.text().catch(() => 'Unknown error');
+                                return { success: false, userName: payload._userName, error: errorText };
+                            }
+                        })
                     )
                 );
-                successCount += results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+
+                // Collect successes and failures
+                results.forEach((result, idx) => {
+                    if (result.status === 'fulfilled') {
+                        if (result.value.success) {
+                            successCount++;
+                        } else {
+                            failureCount++;
+                            errors.push(`${result.value.userName}: ${result.value.error}`);
+                        }
+                    } else {
+                        failureCount++;
+                        errors.push(`${batch[idx]._userName}: ${result.reason.message || 'Network error'}`);
+                    }
+                });
 
                 if (i + BATCH_SIZE < payloads.length) {
                     await sleep(200);
@@ -1164,7 +1229,21 @@
             updatePendingChangesUI();
             cacheBuildingPaused = true;
             workspaceUserMap.delete(currentWorkspaceId);
-            showAlert(`Applied ${successCount} change(s)`, 'success');
+
+            // Show comprehensive feedback
+            if (failureCount === 0) {
+                showAlert(`✓ Successfully applied ${successCount} change(s)`, 'success');
+            } else if (successCount === 0) {
+                showAlert(`✗ Failed to apply all ${failureCount} change(s). ${errors[0]}`, 'error');
+            } else {
+                showAlert(`⚠ Partially completed: ${successCount} applied, ${failureCount} failed. First error: ${errors[0]}`, 'error');
+            }
+
+            // Log all errors to console for debugging
+            if (errors.length > 0) {
+                console.error('Apply role changes errors:', errors);
+            }
+
             await loadWorkspaceUsers();
             cacheBuildingPaused = false;
         }
@@ -1801,6 +1880,8 @@
             if (!confirm(`Add ${selectedViewUser.displayName} to ${workspaceIds.length} workspace(s) as ${role}?`)) return;
 
             let successCount = 0;
+            let failureCount = 0;
+            const errors = [];
 
             for (const workspaceId of workspaceIds) {
                 try {
@@ -1839,18 +1920,38 @@
                             workspaceUserMap.delete(workspaceId);
                         }
                     } else {
-                        const errorData = await response.json().catch(() => ({}));
-                        console.error('API Error:', errorData);
+                        failureCount++;
+                        const workspace = allWorkspacesCache.find(w => w.id === workspaceId);
+                        const workspaceName = workspace ? workspace.name : workspaceId;
+                        const errorText = await response.text().catch(() => 'Unknown error');
+                        errors.push(`${workspaceName}: ${errorText}`);
                     }
                     await sleep(500);
                 } catch (error) {
-                    console.error('Error:', error);
+                    failureCount++;
+                    const workspace = allWorkspacesCache.find(w => w.id === workspaceId);
+                    const workspaceName = workspace ? workspace.name : workspaceId;
+                    errors.push(`${workspaceName}: ${error.message || 'Network error'}`);
                 }
             }
 
             // Pause cache building during update
             cacheBuildingPaused = true;
-            showAlert(`Added to ${successCount} workspace(s)`, 'success');
+
+            // Show comprehensive feedback
+            if (failureCount === 0) {
+                showAlert(`✓ Successfully added to ${successCount} workspace(s)`, 'success');
+            } else if (successCount === 0) {
+                showAlert(`✗ Failed to add to all ${failureCount} workspace(s). ${errors[0]}`, 'error');
+            } else {
+                showAlert(`⚠ Partially completed: Added to ${successCount} workspace(s), ${failureCount} failed. First error: ${errors[0]}`, 'error');
+            }
+
+            // Log all errors to console for debugging
+            if (errors.length > 0) {
+                console.error('Add user to workspaces errors:', errors);
+            }
+
             closeAddWorkspaceAccessModal();
             await loadUserWorkspaces();
             cacheBuildingPaused = false;
@@ -1878,6 +1979,8 @@
             // Process in parallel batches
             const BATCH_SIZE = 5;
             let successCount = 0;
+            let failureCount = 0;
+            const errors = [];
 
             for (let i = 0; i < workspaceIds.length; i += BATCH_SIZE) {
                 const batch = workspaceIds.slice(i, i + BATCH_SIZE);
@@ -1900,11 +2003,32 @@
                             } catch (e) {
                                 workspaceUserMap.delete(workspaceId);
                             }
+                            return { success: true, workspaceId };
+                        } else {
+                            const errorText = await response.text().catch(() => 'Unknown error');
+                            return { success: false, workspaceId, error: errorText };
                         }
-                        return response;
                     })
                 );
-                successCount += results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+
+                // Collect successes and failures
+                results.forEach((result, idx) => {
+                    if (result.status === 'fulfilled') {
+                        if (result.value.success) {
+                            successCount++;
+                        } else {
+                            failureCount++;
+                            const workspace = userWorkspacesById.get(batch[idx]);
+                            const workspaceName = workspace ? workspace.name : batch[idx];
+                            errors.push(`${workspaceName}: ${result.value.error}`);
+                        }
+                    } else {
+                        failureCount++;
+                        const workspace = userWorkspacesById.get(batch[idx]);
+                        const workspaceName = workspace ? workspace.name : batch[idx];
+                        errors.push(`${workspaceName}: ${result.reason.message || 'Network error'}`);
+                    }
+                });
 
                 if (i + BATCH_SIZE < workspaceIds.length) {
                     await sleep(200);
@@ -1912,7 +2036,21 @@
             }
 
             cacheBuildingPaused = true;
-            showAlert(`Changed ${successCount} roles`, 'success');
+
+            // Show comprehensive feedback
+            if (failureCount === 0) {
+                showAlert(`✓ Successfully changed ${successCount} role(s) to ${newRole}`, 'success');
+            } else if (successCount === 0) {
+                showAlert(`✗ Failed to change all ${failureCount} role(s). ${errors[0]}`, 'error');
+            } else {
+                showAlert(`⚠ Partially completed: ${successCount} changed, ${failureCount} failed. First error: ${errors[0]}`, 'error');
+            }
+
+            // Log all errors to console for debugging
+            if (errors.length > 0) {
+                console.error('Bulk change user role errors:', errors);
+            }
+
             selectedWorkspacesForUser.clear();
             await loadUserWorkspaces();
             cacheBuildingPaused = false;
@@ -1927,6 +2065,8 @@
             const workspaceIds = Array.from(selectedWorkspacesForUser);
             const BATCH_SIZE = 5;
             let successCount = 0;
+            let failureCount = 0;
+            const errors = [];
 
             // Process in parallel batches
             for (let i = 0; i < workspaceIds.length; i += BATCH_SIZE) {
@@ -1950,11 +2090,32 @@
                             } catch (e) {
                                 workspaceUserMap.delete(workspaceId);
                             }
+                            return { success: true, workspaceId };
+                        } else {
+                            const errorText = await response.text().catch(() => 'Unknown error');
+                            return { success: false, workspaceId, error: errorText };
                         }
-                        return response;
                     })
                 );
-                successCount += results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+
+                // Collect successes and failures
+                results.forEach((result, idx) => {
+                    if (result.status === 'fulfilled') {
+                        if (result.value.success) {
+                            successCount++;
+                        } else {
+                            failureCount++;
+                            const workspace = userWorkspacesById.get(batch[idx]);
+                            const workspaceName = workspace ? workspace.name : batch[idx];
+                            errors.push(`${workspaceName}: ${result.value.error}`);
+                        }
+                    } else {
+                        failureCount++;
+                        const workspace = userWorkspacesById.get(batch[idx]);
+                        const workspaceName = workspace ? workspace.name : batch[idx];
+                        errors.push(`${workspaceName}: ${result.reason.message || 'Network error'}`);
+                    }
+                });
 
                 if (i + BATCH_SIZE < workspaceIds.length) {
                     await sleep(200);
@@ -1962,7 +2123,21 @@
             }
 
             cacheBuildingPaused = true;
-            showAlert(`Removed from ${successCount} workspace(s)`, 'success');
+
+            // Show comprehensive feedback
+            if (failureCount === 0) {
+                showAlert(`✓ Successfully removed from ${successCount} workspace(s)`, 'success');
+            } else if (successCount === 0) {
+                showAlert(`✗ Failed to remove from all ${failureCount} workspace(s). ${errors[0]}`, 'error');
+            } else {
+                showAlert(`⚠ Partially completed: Removed from ${successCount} workspace(s), ${failureCount} failed. First error: ${errors[0]}`, 'error');
+            }
+
+            // Log all errors to console for debugging
+            if (errors.length > 0) {
+                console.error('Bulk remove user from workspaces errors:', errors);
+            }
+
             selectedWorkspacesForUser.clear();
             await loadUserWorkspaces();
             rebuildKnownUsersCache();
