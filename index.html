@@ -433,7 +433,7 @@
             <div id="userWorkspacesContainer" style="display: none; padding: 30px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h3>Workspace Access</h3>
-                    <button onclick="showAddWorkspaceAccessModal()" class="button-success">
+                    <button onclick="showAddWorkspaceAccessModal()" class="button-success" id="addWorkspaceAccessBtn">
                         ➕ Add Workspace Access
                     </button>
                 </div>
@@ -1141,6 +1141,7 @@
             // Process in parallel batches
             const BATCH_SIZE = 5;
             let successCount = 0;
+            let failureCount = 0;
 
             for (let i = 0; i < payloads.length; i += BATCH_SIZE) {
                 const batch = payloads.slice(i, i + BATCH_SIZE);
@@ -1152,7 +1153,14 @@
                         )
                     )
                 );
-                successCount += results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+
+                results.forEach(result => {
+                    if (result.status === 'fulfilled' && result.value.ok) {
+                        successCount++;
+                    } else {
+                        failureCount++;
+                    }
+                });
 
                 if (i + BATCH_SIZE < payloads.length) {
                     await sleep(200);
@@ -1162,7 +1170,16 @@
             selectedUsers.clear();
             updateWorkspaceBulkActions();
             workspaceUserMap.delete(currentWorkspaceId);
-            showAlert(`Changed ${successCount} role(s) to ${newRole}`, 'success');
+
+            // Show comprehensive feedback
+            if (failureCount === 0) {
+                showAlert(`✓ Successfully changed ${successCount} role(s) to ${newRole}`, 'success');
+            } else if (successCount === 0) {
+                showAlert(`✗ Failed to change roles`, 'error');
+            } else {
+                showAlert(`⚠ Partially completed: ${successCount} changed, ${failureCount} failed`, 'error');
+            }
+
             await loadWorkspaceUsers();
         }
 
@@ -1717,6 +1734,7 @@
                 document.getElementById('workspaceCount').textContent = userWorkspaces.length;
                 document.getElementById('userWorkspacesContainer').style.display = 'block';
                 renderUserWorkspaces();
+                updateAddWorkspaceAccessButton();
                 showAlert(`Found ${userWorkspaces.length} workspaces`, 'success');
             } catch (error) {
                 showAlert('Failed to load workspaces', 'error');
@@ -1999,9 +2017,27 @@
             }
         }
 
+        // Update the "Add Workspace Access" button based on available workspaces with permissions
+        function updateAddWorkspaceAccessButton() {
+            const addBtn = document.getElementById('addWorkspaceAccessBtn');
+            if (!addBtn) return;
+
+            // Get workspaces where user doesn't have access yet
+            const availableWorkspaces = allWorkspacesCache
+                .filter(ws => !userWorkspaces.find(uw => uw.id === ws.id));
+
+            // Check if there's at least one workspace where current user has permission
+            const hasAnyPermission = availableWorkspaces.some(ws => canEditWorkspaceById(ws.id));
+
+            addBtn.disabled = !hasAnyPermission;
+            addBtn.style.opacity = hasAnyPermission ? '1' : '0.5';
+            addBtn.style.cursor = hasAnyPermission ? 'pointer' : 'not-allowed';
+            addBtn.title = hasAnyPermission ? '' : 'You need Admin or Member role in available workspaces to add user access';
+        }
+
         function showAddWorkspaceAccessModal() {
             document.getElementById('modalUserName').textContent = selectedViewUser.displayName;
-            
+
             const availableWorkspaces = allWorkspacesCache
                 .filter(ws => !userWorkspaces.find(uw => uw.id === ws.id))
                 .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
@@ -2013,12 +2049,16 @@
                 container.innerHTML = '<p style="padding: 20px; text-align: center; color: #999;">User has access to all workspaces</p>';
             } else {
                 availableWorkspaces.forEach(ws => {
+                    // Check if current user has permission to add users to this workspace
+                    const hasPermission = canEditWorkspaceById(ws.id);
+
                     const div = document.createElement('div');
                     div.style.padding = '10px';
                     div.style.borderBottom = '1px solid #f0f0f0';
+                    div.style.opacity = hasPermission ? '1' : '0.5';
                     div.innerHTML = `
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" value="${ws.id}" style="margin-right: 10px;">
+                        <label style="display: flex; align-items: center; cursor: ${hasPermission ? 'pointer' : 'not-allowed'};" title="${hasPermission ? '' : 'You need Admin or Member role in this workspace to add users'}">
+                            <input type="checkbox" value="${ws.id}" style="margin-right: 10px;" ${!hasPermission ? 'disabled' : ''}>
                             <span><strong>${escapeHtml(ws.name)}</strong></span>
                         </label>
                     `;
@@ -2049,6 +2089,13 @@
 
             if (workspaceIds.length === 0) {
                 showAlert('Select at least one workspace', 'error');
+                return;
+            }
+
+            // Check if user has permission for at least one selected workspace
+            const hasAnyPermission = workspaceIds.some(wsId => canEditWorkspaceById(wsId));
+            if (!hasAnyPermission) {
+                showAlert('You need Admin or Member role in selected workspaces', 'error');
                 return;
             }
 
@@ -2137,6 +2184,13 @@
 
         async function bulkChangeUserRole(newRole) {
             if (selectedWorkspacesForUser.size === 0) return;
+
+            // Check if user has permission for at least one selected workspace
+            const hasAnyPermission = Array.from(selectedWorkspacesForUser).some(wsId => canEditWorkspaceById(wsId));
+            if (!hasAnyPermission) {
+                showAlert('You need Admin or Member role in selected workspaces', 'error');
+                return;
+            }
 
             if (!confirm(`Change role to ${newRole} for ${selectedWorkspacesForUser.size} workspace(s)?`)) return;
 
@@ -2236,6 +2290,13 @@
 
         async function bulkRemoveUserFromWorkspaces() {
             if (selectedWorkspacesForUser.size === 0) return;
+
+            // Check if user has permission for at least one selected workspace
+            const hasAnyPermission = Array.from(selectedWorkspacesForUser).some(wsId => canEditWorkspaceById(wsId));
+            if (!hasAnyPermission) {
+                showAlert('You need Admin or Member role in selected workspaces', 'error');
+                return;
+            }
 
             if (!confirm(`Remove ${selectedViewUser.displayName} from ${selectedWorkspacesForUser.size} workspace(s)?`)) return;
 
