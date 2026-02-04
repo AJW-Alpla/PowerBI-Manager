@@ -1028,6 +1028,7 @@
             workspaceUserMap.delete(currentWorkspaceId);
             showAlert(`Removed ${successCount} user(s)`, 'success');
             await loadWorkspaceUsers();
+            rebuildKnownUsersCache();
         }
 
         function stageRoleChange(identifier, newRole) {
@@ -1232,12 +1233,13 @@
                     // Invalidate cache for this workspace
                     workspaceUserMap.delete(currentWorkspaceId);
                     await loadWorkspaceUsers();
+                    rebuildKnownUsersCache();
                 }
             } catch (error) {
                 showAlert('Error: ' + error.message, 'error');
             }
         }
-        
+
         // USER VIEW FUNCTIONS
         async function searchUserByEmail() {
             const input = document.getElementById('userViewEmailInput');
@@ -1616,6 +1618,7 @@
                     // Invalidate cache for this workspace
                     workspaceUserMap.delete(workspaceId);
                     await loadUserWorkspaces();
+                    rebuildKnownUsersCache();
                 }
             } catch (error) {
                 showAlert('Error: ' + error.message, 'error');
@@ -1797,6 +1800,7 @@
             showAlert(`Removed from ${successCount} workspace(s)`, 'success');
             selectedWorkspacesForUser.clear();
             await loadUserWorkspaces();
+            rebuildKnownUsersCache();
         }
         
         function clearUserSelection() {
@@ -1982,6 +1986,14 @@
                         identifier: user.identifier
                     });
                 }
+            });
+        }
+
+        // Rebuild knownUsers cache from workspaceUserMap (called after user modifications)
+        function rebuildKnownUsersCache() {
+            knownUsers.clear();
+            workspaceUserMap.forEach((users, workspaceId) => {
+                cacheUsersFromWorkspace(users);
             });
         }
 
