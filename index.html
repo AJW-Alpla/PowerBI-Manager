@@ -911,10 +911,17 @@
                 return;
             }
 
+            // Sort users alphabetically by displayName (fallback to emailAddress)
+            const sortedUsers = [...allUsers].sort((a, b) => {
+                const nameA = (a.displayName || a.emailAddress || '').toLowerCase();
+                const nameB = (b.displayName || b.emailAddress || '').toLowerCase();
+                return nameA.localeCompare(nameB);
+            });
+
             // Use DocumentFragment for batch DOM insertion
             const fragment = document.createDocumentFragment();
 
-            allUsers.forEach(user => {
+            sortedUsers.forEach(user => {
                 const tr = document.createElement('tr');
                 const initials = getInitials(user.displayName || user.emailAddress);
                 const currentRole = user.groupUserAccessRight || 'Viewer';
@@ -1201,6 +1208,11 @@
                         (user.displayName && user.displayName.toLowerCase().includes(searchTerm)) ||
                         (user.email && user.email.toLowerCase().includes(searchTerm))
                     )
+                    .sort((a, b) => {
+                        const nameA = (a.displayName || a.email || '').toLowerCase();
+                        const nameB = (b.displayName || b.email || '').toLowerCase();
+                        return nameA.localeCompare(nameB);
+                    })
                     .slice(0, 10);
 
                 if (matches.length === 0) {
@@ -1573,10 +1585,15 @@
                 return;
             }
 
+            // Sort workspaces alphabetically by name
+            const sortedWorkspaces = [...userWorkspaces].sort((a, b) => {
+                return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+            });
+
             // Use DocumentFragment for batch DOM insertion
             const fragment = document.createDocumentFragment();
 
-            userWorkspaces.forEach(ws => {
+            sortedWorkspaces.forEach(ws => {
                 const tr = document.createElement('tr');
                 const isSelected = selectedWorkspacesForUser.has(ws.id);
                 const escapedId = escapeHtml(ws.id);
@@ -1667,7 +1684,18 @@
 
                 if (response.ok) {
                     showAlert(`Role changed to ${newRole}`, 'success');
-                    workspaceUserMap.delete(workspaceId);
+                    // Re-fetch users for this workspace to update cache
+                    try {
+                        const usersResponse = await apiCall(
+                            `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`
+                        );
+                        if (usersResponse.ok) {
+                            const usersData = await usersResponse.json();
+                            workspaceUserMap.set(workspaceId, usersData.value || []);
+                        }
+                    } catch (e) {
+                        workspaceUserMap.delete(workspaceId);
+                    }
                     await loadUserWorkspaces();
                 }
             } catch (error) {
@@ -1692,7 +1720,18 @@
                 if (response.ok) {
                     showAlert('Removed from workspace', 'success');
                     cacheBuildingPaused = true;
-                    workspaceUserMap.delete(workspaceId);
+                    // Re-fetch users for this workspace to update cache
+                    try {
+                        const usersResponse = await apiCall(
+                            `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`
+                        );
+                        if (usersResponse.ok) {
+                            const usersData = await usersResponse.json();
+                            workspaceUserMap.set(workspaceId, usersData.value || []);
+                        }
+                    } catch (e) {
+                        workspaceUserMap.delete(workspaceId);
+                    }
                     await loadUserWorkspaces();
                     updateKnownUsersCacheForWorkspace(workspaceId, workspaceUserMap.get(workspaceId) || []);
                     cacheBuildingPaused = false;
@@ -1706,9 +1745,9 @@
         function showAddWorkspaceAccessModal() {
             document.getElementById('modalUserName').textContent = selectedViewUser.displayName;
             
-            const availableWorkspaces = allWorkspacesCache.filter(ws => 
-                !userWorkspaces.find(uw => uw.id === ws.id)
-            );
+            const availableWorkspaces = allWorkspacesCache
+                .filter(ws => !userWorkspaces.find(uw => uw.id === ws.id))
+                .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
             
             const container = document.getElementById('availableWorkspacesList');
             container.innerHTML = '';
@@ -1786,8 +1825,19 @@
 
                     if (response.ok) {
                         successCount++;
-                        // Invalidate cache for this workspace
-                        workspaceUserMap.delete(workspaceId);
+                        // Re-fetch users for this workspace to update cache
+                        try {
+                            const usersResponse = await apiCall(
+                                `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`
+                            );
+                            if (usersResponse.ok) {
+                                const usersData = await usersResponse.json();
+                                workspaceUserMap.set(workspaceId, usersData.value || []);
+                            }
+                        } catch (e) {
+                            // If re-fetch fails, delete cache to force reload later
+                            workspaceUserMap.delete(workspaceId);
+                        }
                     } else {
                         const errorData = await response.json().catch(() => ({}));
                         console.error('API Error:', errorData);
@@ -1832,15 +1882,27 @@
             for (let i = 0; i < workspaceIds.length; i += BATCH_SIZE) {
                 const batch = workspaceIds.slice(i, i + BATCH_SIZE);
                 const results = await Promise.allSettled(
-                    batch.map(workspaceId =>
-                        apiCall(
+                    batch.map(async workspaceId => {
+                        const response = await apiCall(
                             `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`,
                             { method: 'PUT', body: bodyStr }
-                        ).then(response => {
-                            if (response.ok) workspaceUserMap.delete(workspaceId);
-                            return response;
-                        })
-                    )
+                        );
+                        if (response.ok) {
+                            // Re-fetch users for this workspace to update cache
+                            try {
+                                const usersResponse = await apiCall(
+                                    `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`
+                                );
+                                if (usersResponse.ok) {
+                                    const usersData = await usersResponse.json();
+                                    workspaceUserMap.set(workspaceId, usersData.value || []);
+                                }
+                            } catch (e) {
+                                workspaceUserMap.delete(workspaceId);
+                            }
+                        }
+                        return response;
+                    })
                 );
                 successCount += results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
 
@@ -1870,15 +1932,27 @@
             for (let i = 0; i < workspaceIds.length; i += BATCH_SIZE) {
                 const batch = workspaceIds.slice(i, i + BATCH_SIZE);
                 const results = await Promise.allSettled(
-                    batch.map(workspaceId =>
-                        apiCall(
+                    batch.map(async workspaceId => {
+                        const response = await apiCall(
                             `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users/${encodeURIComponent(userIdentifier)}`,
                             { method: 'DELETE' }
-                        ).then(response => {
-                            if (response.ok) workspaceUserMap.delete(workspaceId);
-                            return response;
-                        })
-                    )
+                        );
+                        if (response.ok) {
+                            // Re-fetch users for this workspace to update cache
+                            try {
+                                const usersResponse = await apiCall(
+                                    `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`
+                                );
+                                if (usersResponse.ok) {
+                                    const usersData = await usersResponse.json();
+                                    workspaceUserMap.set(workspaceId, usersData.value || []);
+                                }
+                            } catch (e) {
+                                workspaceUserMap.delete(workspaceId);
+                            }
+                        }
+                        return response;
+                    })
                 );
                 successCount += results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
 
@@ -1977,6 +2051,7 @@
 
                 const matches = allWorkspaces
                     .filter(ws => ws.name.toLowerCase().includes(searchTerm))
+                    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
                     .slice(0, 10);
 
                 if (matches.length === 0) {
@@ -2032,6 +2107,11 @@
                         (user.displayName && user.displayName.toLowerCase().includes(searchTerm)) ||
                         (user.email && user.email.toLowerCase().includes(searchTerm))
                     )
+                    .sort((a, b) => {
+                        const nameA = (a.displayName || a.email || '').toLowerCase();
+                        const nameB = (b.displayName || b.email || '').toLowerCase();
+                        return nameA.localeCompare(nameB);
+                    })
                     .slice(0, 25);
 
                 if (matches.length === 0) {
