@@ -1,12 +1,1944 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>My GitHub Page</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Power BI Rights Manager</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+        }
+        
+        .header h1 { font-size: 28px; margin-bottom: 10px; }
+        .header p { opacity: 0.9; font-size: 14px; }
+        
+        .auth-section {
+            padding: 30px;
+            border-bottom: 1px solid #e0e0e0;
+            background: #f8f9fa;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        
+        .status-badge.authenticated { background: #d4edda; color: #155724; }
+        .status-badge.not-authenticated { background: #f8d7da; color: #721c24; }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            transition: all 0.3s;
+        }
+        
+        button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        
+        .button-secondary { background: #6c757d; }
+        .button-success { background: #28a745; }
+        .button-danger { background: #dc3545; }
+        
+        .view-toggle {
+            padding: 10px 20px;
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+        }
+        
+        .view-toggle.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: transparent;
+        }
+        
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #333; }
+        
+        input[type="text"], textarea, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+        
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th { background: #f8f9fa; padding: 15px; text-align: left; font-weight: 600; border-bottom: 2px solid #e0e0e0; }
+        td { padding: 15px; border-bottom: 1px solid #f0f0f0; }
+        tr:hover { background: #f8f9fa; }
+        
+        .checkbox-cell { width: 40px; text-align: center; }
+        
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        .user-avatar-large {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 32px;
+            font-weight: 600;
+        }
+        
+        .role-badge {
+            padding: 6px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            display: inline-block;
+        }
+        
+        .role-badge.role-admin { background: #e3f2fd; color: #1976d2; }
+        .role-badge.role-member { background: #f3e5f5; color: #7b1fa2; }
+        .role-badge.role-contributor { background: #fff3e0; color: #e65100; }
+        .role-badge.role-viewer { background: #e8f5e9; color: #2e7d32; }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.active { display: flex; }
+        
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        
+        .modal-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 30px;
+            border-radius: 12px 12px 0 0;
+        }
+        
+        .modal-body { padding: 30px; }
+        .modal-footer { padding: 20px 30px; border-top: 1px solid #e0e0e0; display: flex; gap: 10px; justify-content: flex-end; }
+        
+        .alert {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 10001;
+            max-width: 400px;
+            animation: slideIn 0.3s;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(400px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .alert.success { background: #d4edda; color: #155724; border-left: 4px solid #28a745; }
+        .alert.error { background: #f8d7da; color: #721c24; border-left: 4px solid #dc3545; }
+        .alert.info { background: #d1ecf1; color: #0c5460; border-left: 4px solid #17a2b8; }
+        
+        .user-search-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 2px solid #667eea;
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            max-height: 400px;
+            overflow-y: auto;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .user-search-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .user-search-item:hover { background: #f8f9fa; }
+        
+        .user-search-section {
+            padding: 30px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .user-card {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .pending-changes {
+            background: #fff3e6;
+            border: 2px solid #ff6b00;
+            padding: 15px 30px;
+            margin: 0 30px 20px;
+            border-radius: 6px;
+        }
+        
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+    </style>
 </head>
 <body>
-  <h1>Hello — this is my GitHub Page!</h1>
-  <p>Hosted with GitHub Pages at <a href="https://AJW-Alpla.github.io">AJW-Alpla.github.io</a></p>
+    <div class="container">
+        <div class="header">
+            <h1>⚡ Power BI Rights Manager</h1>
+            <p>Manage workspace permissions and user access</p>
+        </div>
+        
+        <div class="auth-section">
+            <span id="authStatus" class="status-badge not-authenticated">⚠️ Not Authenticated</span>
+            <button onclick="showManualTokenModal()" style="background: linear-gradient(135deg, #0078d4 0%, #106ebe 100%);">
+                <span style="display: inline-flex; align-items: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+                    Sign in with Power BI
+                </span>
+            </button>
+            <button onclick="signOut()" id="signOutBtn" class="button-secondary" style="display: none;">Sign out</button>
+
+            <div style="display: flex; gap: 10px; margin-left: auto;">
+                <button id="workspaceViewBtn" onclick="switchView('workspace')" class="view-toggle active">
+                    📁 Workspace View
+                </button>
+                <button id="userViewBtn" onclick="switchView('user')" class="view-toggle">
+                    👤 User View
+                </button>
+            </div>
+        </div>
+        
+        <!-- WORKSPACE VIEW -->
+        <div id="workspaceView">
+            <div style="padding: 30px; border-bottom: 1px solid #e0e0e0;">
+                <h2>📁 Workspace User Manager</h2>
+                <p style="color: #666; margin-bottom: 20px;">
+                    Enter a workspace name to see and manage all users
+                </p>
+                <div style="max-width: 600px;">
+                    <div style="display: flex; gap: 10px; position: relative;">
+                        <div style="flex: 1; position: relative;">
+                            <input type="text" id="workspaceSearch"
+                                   placeholder="📁 Enter workspace name (e.g., Sales Reports)"
+                                   style="width: 100%;" disabled
+                                   oninput="showWorkspaceSuggestions()"
+                                   onkeypress="if(event.key === 'Enter') { hideWorkspaceSuggestions(); searchWorkspace(); }"
+                                   onfocus="showWorkspaceSuggestions()"
+                                   autocomplete="off">
+                            <div id="workspaceSuggestions" class="user-search-dropdown" style="display: none;"></div>
+                        </div>
+                        <button onclick="searchWorkspace()" class="button-success" id="searchWorkspaceBtn" disabled>Search</button>
+                    </div>
+                    <p style="font-size: 12px; color: #666; margin-top: 8px;">
+                        💡 Start typing to see matching workspaces
+                    </p>
+                </div>
+                <div id="selectedWorkspaceInfo" style="display: none; margin-top: 15px; padding: 15px; background: #e7f3ff; border-radius: 6px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <strong>Selected Workspace:</strong> <span id="selectedWorkspaceName"></span>
+                        </div>
+                        <button onclick="clearWorkspaceSelection()" class="button-secondary">Change Workspace</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="pendingChangesContainer" class="pending-changes" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: start;">
+                    <div style="flex: 1;">
+                        <div style="font-weight: 700; color: #ff6b00; margin-bottom: 10px;">
+                            ⚠️ <span id="pendingChangesCount">0</span> Pending Changes
+                        </div>
+                        <div id="pendingChangesList" style="max-height: 150px; overflow-y: auto; font-size: 13px;"></div>
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="applyPendingRoleChanges()" class="button-success">✓ Apply</button>
+                        <button onclick="cancelPendingRoleChanges()" class="button-secondary">✗ Cancel</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="padding: 30px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 id="workspaceInfo">Users & Permissions</h3>
+                    <button onclick="showAddUserModal()" class="button-success" id="addUserBtn" style="display: none;">
+                        ➕ Add User
+                    </button>
+                </div>
+                
+                <!-- Bulk Actions Bar -->
+                <div id="workspaceBulkActions" style="display: none; gap: 10px; padding: 15px; background: #fff3e6; 
+                     border: 2px solid #ff6b00; border-radius: 6px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
+                    <span id="selectedUsersCount" style="font-weight: 600; color: #ff6b00;">0 selected</span>
+                    <button onclick="bulkSetRole('Admin')">Set Admin</button>
+                    <button onclick="bulkSetRole('Member')">Set Member</button>
+                    <button onclick="bulkSetRole('Contributor')">Set Contributor</button>
+                    <button onclick="bulkSetRole('Viewer')">Set Viewer</button>
+                    <button onclick="bulkRemoveUsers()" class="button-danger">Remove from Selected</button>
+                </div>
+                
+                <table id="usersTable">
+                    <thead>
+                        <tr>
+                            <th class="checkbox-cell"><input type="checkbox" onchange="toggleSelectAll(this.checked)"></th>
+                            <th>User</th>
+                            <th>Email</th>
+                            <th>Current Role</th>
+                            <th>Assign Role</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="userTableBody">
+                        <tr><td colspan="6" class="empty-state">
+                            <div style="padding: 40px;">
+                                <div style="font-size: 48px; margin-bottom: 15px;">📁</div>
+                                <p>Enter a workspace name above to view and manage users</p>
+                            </div>
+                        </td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- USER VIEW -->
+        <div id="userView" style="display: none;">
+            <div style="padding: 30px; border-bottom: 1px solid #e0e0e0;">
+                <h2>👤 User & Group Workspace Manager</h2>
+                <p style="color: #666; margin-bottom: 20px;">
+                    Enter a user's email or group name to see and manage all their workspace access
+                </p>
+                <div style="max-width: 600px;">
+                    <div style="display: flex; gap: 10px; position: relative;">
+                        <div style="flex: 1; position: relative;">
+                            <input type="text" id="userViewEmailInput"
+                                   placeholder="📧 Enter user email or group name (e.g., john.doe@company.com or BI-Global-Admin)"
+                                   style="width: 100%;"
+                                   oninput="showUserSuggestions()"
+                                   onkeypress="if(event.key === 'Enter') { hideUserSuggestions(); searchUserByEmail(); }"
+                                   onfocus="showUserSuggestions()"
+                                   autocomplete="off">
+                            <div id="userSuggestions" class="user-search-dropdown" style="display: none;"></div>
+                        </div>
+                        <button onclick="searchUserByEmail()" class="button-success">Search</button>
+                    </div>
+                    <p style="font-size: 12px; color: #666; margin-top: 8px;">
+                        💡 Start typing to see users and groups from loaded workspaces
+                    </p>
+                </div>
+                <div id="selectedUserPanel" style="display: none; margin-top: 15px; padding: 15px; background: #e7f3ff; border-radius: 6px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="flex: 1;">
+                            <strong>Selected User:</strong> <span id="selectedUserPanelName"></span>
+                            <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                                <span id="selectedUserPanelEmail"></span> • <strong id="workspaceCount">0</strong> workspaces
+                            </div>
+                        </div>
+                        <button onclick="clearUserSelection()" class="button-secondary">Change User</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="userWorkspacesContainer" style="display: none; padding: 30px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3>Workspace Access</h3>
+                    <button onclick="showAddWorkspaceAccessModal()" class="button-success">
+                        ➕ Add Workspace Access
+                    </button>
+                </div>
+                
+                <!-- Bulk Actions Bar (Top Position) -->
+                <div id="userBulkActions" style="display: none; gap: 10px; padding: 15px; background: #fff3e6; 
+                     border: 2px solid #ff6b00; border-radius: 6px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
+                    <span id="selectedWorkspacesCount" style="font-weight: 600; color: #ff6b00;">0 selected</span>
+                    <button onclick="bulkChangeUserRole('Admin')">Set Admin</button>
+                    <button onclick="bulkChangeUserRole('Member')">Set Member</button>
+                    <button onclick="bulkChangeUserRole('Contributor')">Set Contributor</button>
+                    <button onclick="bulkChangeUserRole('Viewer')">Set Viewer</button>
+                    <button onclick="bulkRemoveUserFromWorkspaces()" class="button-danger">Remove from Selected</button>
+                </div>
+                
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="checkbox-cell"><input type="checkbox" onchange="toggleAllUserWorkspaces(this.checked)"></th>
+                            <th>Workspace Name</th>
+                            <th>Current Role</th>
+                            <th>Type</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="userWorkspacesTable">
+                        <tr><td colspan="5" class="empty-state">
+                            <div style="padding: 40px;">
+                                <div style="font-size: 48px; margin-bottom: 15px;">👤</div>
+                                <p>Enter a user email above to view their workspace access</p>
+                            </div>
+                        </td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Sign In Modal -->
+    <div class="modal" id="authModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🔐 Sign in to Power BI</h2>
+            </div>
+            <div class="modal-body">
+                <div style="padding: 15px; background: #e3f2fd; border-radius: 6px; margin-bottom: 20px; border: 1px solid #2196f3;">
+                    <p style="color: #1565c0; font-size: 13px;">
+                        <strong>Step 1:</strong> Run this command in PowerShell (opens Microsoft login):
+                    </p>
+                </div>
+                <div style="background: #1e1e1e; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+                    <code id="psCommand" style="display: block; color: #9cdcfe; font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; white-space: pre-wrap; line-height: 1.6; cursor: pointer;"
+                          onclick="copyPowerShellCommand()" title="Click to copy">Connect-PowerBIServiceAccount; (Get-PowerBIAccessToken).Authorization.Replace("Bearer ","") | Set-Clipboard; Write-Host "Token copied!" -ForegroundColor Green</code>
+                    <button onclick="copyPowerShellCommand()" style="margin-top: 10px; font-size: 11px; padding: 5px 10px;">📋 Copy Command</button>
+                </div>
+                <div style="padding: 15px; background: #e8f5e9; border-radius: 6px; margin-bottom: 20px; border: 1px solid #4caf50;">
+                    <p style="color: #2e7d32; font-size: 13px;">
+                        <strong>Step 2:</strong> After signing in, the token is copied. Paste it below:
+                    </p>
+                </div>
+                <div class="form-group">
+                    <label>Access Token:</label>
+                    <textarea id="manualToken" placeholder="Paste token here (Ctrl+V)..."
+                              style="min-height: 100px; font-family: monospace; font-size: 11px;"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeAuthModal()" class="button-secondary">Cancel</button>
+                <button onclick="authenticateWithToken()" class="button-success">✅ Sign In</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add User Modal -->
+    <div class="modal" id="addUserModal">
+        <div class="modal-content">
+            <div class="modal-header"><h2>➕ Add User</h2></div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Email or Object ID</label>
+                    <input type="text" id="newUserEmail" placeholder="user@company.com or Object ID">
+                </div>
+                <div class="form-group">
+                    <label>Role</label>
+                    <select id="newUserRole">
+                        <option value="Viewer">Viewer</option>
+                        <option value="Contributor">Contributor</option>
+                        <option value="Member">Member</option>
+                        <option value="Admin">Admin</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Type</label>
+                    <select id="newUserType">
+                        <option value="User">User</option>
+                        <option value="Group">Group</option>
+                        <option value="App">App</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeAddUserModal()" class="button-secondary">Cancel</button>
+                <button onclick="addUser()" class="button-success">Add</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add Workspace Access Modal -->
+    <div class="modal" id="addWorkspaceAccessModal">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h2>➕ Add Workspace Access for <span id="modalUserName"></span></h2>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Search Workspaces</label>
+                    <input type="text" id="workspaceSearchInput" 
+                           placeholder="Type to filter..." oninput="filterAvailableWorkspaces()">
+                </div>
+                <div class="form-group">
+                    <label>Available Workspaces</label>
+                    <div id="availableWorkspacesList" style="max-height: 300px; overflow-y: auto; 
+                         border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px;">
+                        Loading...
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Role</label>
+                    <select id="bulkWorkspaceRole">
+                        <option value="Viewer">Viewer</option>
+                        <option value="Contributor">Contributor</option>
+                        <option value="Member">Member</option>
+                        <option value="Admin">Admin</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeAddWorkspaceAccessModal()" class="button-secondary">Cancel</button>
+                <button onclick="addUserToSelectedWorkspaces()" class="button-success">Add to Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let accessToken = null;
+        let tokenExpiry = null;
+        let currentWorkspaceId = null;
+        let allUsers = [];
+        let selectedUsers = new Set();
+        let allWorkspaces = [];
+        let pendingRoleChanges = new Map();
+
+        // User View
+        let currentView = 'workspace';
+        let selectedViewUser = null;
+        let userWorkspaces = [];
+        let selectedWorkspacesForUser = new Set();
+        let allWorkspacesCache = [];
+        let searchTimeout = null;
+        let knownUsers = new Map(); // Cache of users seen across workspaces
+        let workspaceUserMap = new Map(); // workspaceId -> users array (full cache)
+        let userCacheBuilt = false; // Flag to track if full cache is ready
+
+
+        // Sign out
+        function signOut() {
+            accessToken = null;
+            tokenExpiry = null;
+
+            // Clear caches
+            workspaceUserMap.clear();
+            knownUsers.clear();
+            userCacheBuilt = false;
+            allWorkspacesCache = [];
+            allWorkspaces = [];
+            sessionStorage.removeItem('pbi_token');
+
+            // Reset UI
+            document.getElementById('authStatus').className = 'status-badge not-authenticated';
+            document.getElementById('authStatus').innerHTML = '⚠️ Not Authenticated';
+            document.getElementById('workspaceSearch').disabled = true;
+            document.getElementById('searchWorkspaceBtn').disabled = true;
+            document.getElementById('signOutBtn').style.display = 'none';
+            clearWorkspaceSelection();
+
+            showAlert('Signed out', 'info');
+        }
+
+        // Sign in modal
+        function showManualTokenModal() {
+            document.getElementById('authModal').classList.add('active');
+        }
+
+        function closeAuthModal() {
+            document.getElementById('authModal').classList.remove('active');
+        }
+
+        function copyPowerShellCommand() {
+            const cmd = 'Connect-PowerBIServiceAccount; (Get-PowerBIAccessToken).Authorization.Replace("Bearer ","") | Set-Clipboard; Write-Host "Token copied!" -ForegroundColor Green';
+            navigator.clipboard.writeText(cmd).then(() => {
+                showAlert('PowerShell command copied! Paste in PowerShell and run.', 'success');
+            }).catch(() => {
+                // Fallback for older browsers
+                const el = document.getElementById('psCommand');
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                window.getSelection().removeAllRanges();
+                window.getSelection().addRange(range);
+                document.execCommand('copy');
+                showAlert('Command selected - press Ctrl+C to copy', 'info');
+            });
+        }
+
+        async function authenticateWithToken() {
+            const token = document.getElementById('manualToken').value.trim();
+            if (!token || !token.startsWith('eyJ')) {
+                showAlert('Invalid token format', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('https://api.powerbi.com/v1.0/myorg/groups?$top=1', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    accessToken = token;
+                    tokenExpiry = Date.now() + (3600 * 1000);
+                    sessionStorage.setItem('pbi_token', token);
+
+                    // Reset caches on new authentication
+                    workspaceUserMap.clear();
+                    knownUsers.clear();
+                    userCacheBuilt = false;
+                    allWorkspacesCache = [];
+
+                    document.getElementById('authStatus').className = 'status-badge authenticated';
+                    document.getElementById('authStatus').innerHTML = '✅ Authenticated';
+                    document.getElementById('workspaceSearch').disabled = false;
+                    document.getElementById('signOutBtn').style.display = 'inline-block';
+
+                    closeAuthModal();
+                    showAlert('Authentication successful!', 'success');
+                    await loadWorkspaces();
+                } else {
+                    throw new Error('Invalid token');
+                }
+            } catch (error) {
+                showAlert('Authentication failed: ' + error.message, 'error');
+            }
+        }
+        
+        // VIEW SWITCHER
+        function switchView(view) {
+            currentView = view;
+            document.getElementById('workspaceView').style.display = view === 'workspace' ? 'block' : 'none';
+            document.getElementById('userView').style.display = view === 'user' ? 'block' : 'none';
+            document.getElementById('workspaceViewBtn').classList.toggle('active', view === 'workspace');
+            document.getElementById('userViewBtn').classList.toggle('active', view === 'user');
+        }
+        
+        // WORKSPACE VIEW FUNCTIONS
+        async function loadWorkspaces() {
+            try {
+                const response = await apiCall('https://api.powerbi.com/v1.0/myorg/groups');
+                const data = await response.json();
+                allWorkspaces = data.value || [];
+                allWorkspacesCache = allWorkspaces; // Keep cache in sync
+
+                // Enable search
+                document.getElementById('workspaceSearch').disabled = false;
+                document.getElementById('searchWorkspaceBtn').disabled = false;
+
+                showAlert(`Loaded ${allWorkspaces.length} workspaces`, 'success');
+
+                // Start building user cache in background
+                buildUserCache();
+            } catch (error) {
+                showAlert('Error loading workspaces', 'error');
+            }
+        }
+
+        // Build complete user cache using parallel requests
+        async function buildUserCache() {
+            if (userCacheBuilt || allWorkspacesCache.length === 0) return;
+
+            const BATCH_SIZE = 10; // Process 10 workspaces in parallel
+            const total = allWorkspacesCache.length;
+            let processed = 0;
+
+            showAlert(`Building user cache... 0/${total}`, 'info');
+
+            for (let i = 0; i < total; i += BATCH_SIZE) {
+                const batch = allWorkspacesCache.slice(i, i + BATCH_SIZE);
+
+                // Run batch in parallel
+                const results = await Promise.allSettled(
+                    batch.map(async (workspace) => {
+                        try {
+                            const response = await apiCall(
+                                `https://api.powerbi.com/v1.0/myorg/groups/${workspace.id}/users`
+                            );
+                            if (response.ok) {
+                                const data = await response.json();
+                                return { workspaceId: workspace.id, users: data.value || [] };
+                            }
+                            return { workspaceId: workspace.id, users: [] };
+                        } catch (e) {
+                            return { workspaceId: workspace.id, users: [] };
+                        }
+                    })
+                );
+
+                // Store results in cache
+                results.forEach(result => {
+                    if (result.status === 'fulfilled') {
+                        const { workspaceId, users } = result.value;
+                        workspaceUserMap.set(workspaceId, users);
+                        cacheUsersFromWorkspace(users);
+                    }
+                });
+
+                processed += batch.length;
+
+                // Update progress every few batches
+                if (processed % 30 === 0 || processed === total) {
+                    showAlert(`Building user cache... ${processed}/${total}`, 'info');
+                }
+
+                // Small delay between batches to avoid rate limiting
+                if (i + BATCH_SIZE < total) {
+                    await sleep(200);
+                }
+            }
+
+            userCacheBuilt = true;
+            showAlert(`User cache ready! ${workspaceUserMap.size} workspaces cached`, 'success');
+        }
+        
+        function searchWorkspace() {
+            const search = document.getElementById('workspaceSearch').value.trim();
+            
+            if (!search) {
+                showAlert('Please enter a workspace name', 'error');
+                return;
+            }
+            
+            // Find exact match first
+            let workspace = allWorkspaces.find(ws => ws.name.toLowerCase() === search.toLowerCase());
+            
+            if (!workspace) {
+                // Find partial match
+                const matches = allWorkspaces.filter(ws => 
+                    ws.name.toLowerCase().includes(search.toLowerCase())
+                );
+                
+                if (matches.length === 0) {
+                    showAlert('No workspace found with that name', 'error');
+                    return;
+                }
+                
+                if (matches.length === 1) {
+                    workspace = matches[0];
+                } else {
+                    // Multiple matches - show list
+                    let message = `Found ${matches.length} workspaces:\n\n`;
+                    matches.slice(0, 10).forEach((ws, i) => {
+                        message += `${i + 1}. ${ws.name}\n`;
+                    });
+                    if (matches.length > 10) {
+                        message += `\n...and ${matches.length - 10} more`;
+                    }
+                    message += '\n\nPlease be more specific.';
+                    alert(message);
+                    return;
+                }
+            }
+            
+            // Select the workspace
+            selectWorkspace(workspace);
+        }
+        
+        async function selectWorkspace(workspace) {
+            currentWorkspaceId = workspace.id;
+            document.getElementById('workspaceSearch').value = '';
+            document.getElementById('selectedWorkspaceInfo').style.display = 'block';
+            document.getElementById('selectedWorkspaceName').textContent = workspace.name;
+            document.getElementById('workspaceInfo').textContent = workspace.name;
+            document.getElementById('addUserBtn').style.display = 'block';
+            
+            showAlert('Loading users...', 'info');
+            await loadWorkspaceUsers();
+        }
+        
+        function clearWorkspaceSelection() {
+            currentWorkspaceId = null;
+            allUsers = [];
+            selectedUsers.clear();
+            pendingRoleChanges.clear();
+            document.getElementById('workspaceSearch').value = '';
+            document.getElementById('selectedWorkspaceInfo').style.display = 'none';
+            document.getElementById('workspaceInfo').textContent = 'Users & Permissions';
+            document.getElementById('addUserBtn').style.display = 'none';
+            document.getElementById('userTableBody').innerHTML = '<tr><td colspan="6" class="empty-state"><div style="padding: 40px;"><div style="font-size: 48px; margin-bottom: 15px;">📁</div><p>Enter a workspace name above to view and manage users</p></div></td></tr>';
+            document.getElementById('pendingChangesContainer').style.display = 'none';
+        }
+        
+        async function loadWorkspaceUsers() {
+            const tbody = document.getElementById('userTableBody');
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px;"><div class="loading-spinner"></div></td></tr>';
+
+            try {
+                // Check if we have cached data for this workspace
+                if (workspaceUserMap.has(currentWorkspaceId)) {
+                    allUsers = workspaceUserMap.get(currentWorkspaceId);
+                    renderUsers();
+                    return;
+                }
+
+                // Otherwise fetch from API
+                const response = await apiCall(`https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users`);
+                const data = await response.json();
+                allUsers = data.value || [];
+
+                // Update cache
+                workspaceUserMap.set(currentWorkspaceId, allUsers);
+                cacheUsersFromWorkspace(allUsers);
+                renderUsers();
+            } catch (error) {
+                showAlert('Error loading users', 'error');
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Error loading users</td></tr>';
+            }
+        }
+        
+        function renderUsers() {
+            const tbody = document.getElementById('userTableBody');
+            tbody.innerHTML = '';
+            
+            if (allUsers.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No users found</td></tr>';
+                return;
+            }
+            
+            allUsers.forEach(user => {
+                const tr = document.createElement('tr');
+                const initials = getInitials(user.displayName || user.emailAddress);
+                const currentRole = user.groupUserAccessRight || 'Viewer';
+                const pendingRole = pendingRoleChanges.get(user.identifier);
+                const displayRole = pendingRole || currentRole;
+                
+                tr.innerHTML = `
+                    <td class="checkbox-cell">
+                        <input type="checkbox" onchange="toggleUserSelection('${user.identifier}')"
+                               ${selectedUsers.has(user.identifier) ? 'checked' : ''}>
+                    </td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <div class="user-avatar">${initials}</div>
+                            <strong>${escapeHtml(user.displayName || user.emailAddress)}</strong>
+                        </div>
+                    </td>
+                    <td>${escapeHtml(user.emailAddress || user.identifier)}</td>
+                    <td>
+                        <span class="role-badge role-${currentRole.toLowerCase()}">${currentRole}</span>
+                        ${pendingRole ? `<div style="margin-top: 4px; color: #ff6b00; font-weight: 600;">→ ${pendingRole}</div>` : ''}
+                    </td>
+                    <td>
+                        <div style="display: flex; gap: 10px;">
+                            ${['Admin', 'Member', 'Contributor', 'Viewer'].map(role => `
+                                <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                    <input type="radio" name="role-${user.identifier}" value="${role}"
+                                           ${displayRole === role ? 'checked' : ''}
+                                           onchange="stageRoleChange('${user.identifier}', '${role}')">
+                                    <span style="font-size: 13px;">${role}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </td>
+                    <td>
+                        <button onclick="removeUser('${user.identifier}')" class="button-danger" 
+                                style="padding: 6px 12px; font-size: 13px;">🗑️</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+        
+        function toggleUserSelection(identifier) {
+            if (selectedUsers.has(identifier)) {
+                selectedUsers.delete(identifier);
+            } else {
+                selectedUsers.add(identifier);
+            }
+            updateWorkspaceBulkActions();
+        }
+        
+        function toggleSelectAll(checked) {
+            selectedUsers.clear();
+            if (checked) {
+                allUsers.forEach(u => selectedUsers.add(u.identifier));
+            }
+            updateWorkspaceBulkActions();
+            renderUsers();
+        }
+        
+        function updateWorkspaceBulkActions() {
+            const div = document.getElementById('workspaceBulkActions');
+            const count = selectedUsers.size;
+            
+            if (count > 0) {
+                div.style.display = 'flex';
+                document.getElementById('selectedUsersCount').textContent = `${count} selected`;
+            } else {
+                div.style.display = 'none';
+            }
+        }
+        
+        async function bulkSetRole(newRole) {
+            if (selectedUsers.size === 0) return;
+            
+            if (!confirm(`Set role to ${newRole} for ${selectedUsers.size} user(s)?`)) return;
+            
+            let successCount = 0;
+            
+            for (const identifier of selectedUsers) {
+                const user = allUsers.find(u => u.identifier === identifier);
+                if (!user) continue;
+                
+                try {
+                    const payload = {
+                        groupUserAccessRight: newRole,
+                        principalType: user.principalType || 'User',
+                        identifier: user.identifier,
+                        emailAddress: user.emailAddress || user.identifier
+                    };
+                    
+                    const response = await apiCall(
+                        `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users`,
+                        { method: 'PUT', body: JSON.stringify(payload) }
+                    );
+                    
+                    if (response.ok) successCount++;
+                    await sleep(500);
+                } catch (error) {
+                    console.error('Error:', error);
+                }
+            }
+            
+            selectedUsers.clear();
+            updateWorkspaceBulkActions();
+            // Invalidate cache for this workspace
+            workspaceUserMap.delete(currentWorkspaceId);
+            showAlert(`Changed ${successCount} role(s) to ${newRole}`, 'success');
+            await loadWorkspaceUsers();
+        }
+
+        async function bulkRemoveUsers() {
+            if (selectedUsers.size === 0) return;
+            
+            if (!confirm(`Remove ${selectedUsers.size} user(s) from this workspace?`)) return;
+            
+            let successCount = 0;
+            
+            for (const identifier of selectedUsers) {
+                try {
+                    const response = await apiCall(
+                        `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users/${encodeURIComponent(identifier)}`,
+                        { method: 'DELETE' }
+                    );
+                    
+                    if (response.ok) successCount++;
+                    await sleep(500);
+                } catch (error) {
+                    console.error('Error:', error);
+                }
+            }
+            
+            selectedUsers.clear();
+            updateWorkspaceBulkActions();
+            // Invalidate cache for this workspace
+            workspaceUserMap.delete(currentWorkspaceId);
+            showAlert(`Removed ${successCount} user(s)`, 'success');
+            await loadWorkspaceUsers();
+        }
+
+        function stageRoleChange(identifier, newRole) {
+            const user = allUsers.find(u => u.identifier === identifier);
+            const currentRole = user.groupUserAccessRight || 'Viewer';
+            
+            if (newRole === currentRole) {
+                pendingRoleChanges.delete(identifier);
+            } else {
+                pendingRoleChanges.set(identifier, newRole);
+            }
+            
+            updatePendingChangesUI();
+            renderUsers();
+        }
+        
+        function updatePendingChangesUI() {
+            const container = document.getElementById('pendingChangesContainer');
+            const count = pendingRoleChanges.size;
+            
+            if (count > 0) {
+                container.style.display = 'block';
+                document.getElementById('pendingChangesCount').textContent = count;
+                
+                let html = '';
+                pendingRoleChanges.forEach((newRole, identifier) => {
+                    const user = allUsers.find(u => u.identifier === identifier);
+                    if (user) {
+                        const currentRole = user.groupUserAccessRight || 'Viewer';
+                        html += `<div style="padding: 8px 0; border-bottom: 1px solid #f0f0f0;">
+                            <strong>${escapeHtml(user.displayName || user.emailAddress)}</strong>: 
+                            ${currentRole} → <span style="color: #ff6b00; font-weight: 600;">${newRole}</span>
+                        </div>`;
+                    }
+                });
+                document.getElementById('pendingChangesList').innerHTML = html;
+            } else {
+                container.style.display = 'none';
+            }
+        }
+        
+        async function applyPendingRoleChanges() {
+            if (pendingRoleChanges.size === 0) return;
+            
+            if (!confirm(`Apply ${pendingRoleChanges.size} role change(s)?`)) return;
+            
+            let successCount = 0;
+            
+            for (const [identifier, newRole] of pendingRoleChanges.entries()) {
+                const user = allUsers.find(u => u.identifier === identifier);
+                if (!user) continue;
+                
+                try {
+                    const payload = {
+                        groupUserAccessRight: newRole,
+                        principalType: user.principalType || 'User',
+                        identifier: user.identifier,
+                        emailAddress: user.emailAddress || user.identifier
+                    };
+                    
+                    const response = await apiCall(
+                        `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users`,
+                        { method: 'PUT', body: JSON.stringify(payload) }
+                    );
+                    
+                    if (response.ok) successCount++;
+                    await sleep(500);
+                } catch (error) {
+                    console.error('Error:', error);
+                }
+            }
+            
+            pendingRoleChanges.clear();
+            updatePendingChangesUI();
+            // Invalidate cache for this workspace
+            workspaceUserMap.delete(currentWorkspaceId);
+            showAlert(`Applied ${successCount} change(s)`, 'success');
+            await loadWorkspaceUsers();
+        }
+
+        function cancelPendingRoleChanges() {
+            if (!confirm(`Cancel ${pendingRoleChanges.size} pending change(s)?`)) return;
+            
+            pendingRoleChanges.clear();
+            updatePendingChangesUI();
+            renderUsers();
+            showAlert('Changes cancelled', 'info');
+        }
+        
+        function showAddUserModal() {
+            document.getElementById('addUserModal').classList.add('active');
+        }
+        
+        function closeAddUserModal() {
+            document.getElementById('addUserModal').classList.remove('active');
+        }
+        
+        async function addUser() {
+            const email = document.getElementById('newUserEmail').value.trim();
+            const role = document.getElementById('newUserRole').value;
+            const type = document.getElementById('newUserType').value;
+
+            if (!email) {
+                showAlert('Enter email or object ID', 'error');
+                return;
+            }
+
+            try {
+                const payload = {
+                    emailAddress: email,
+                    identifier: email,
+                    groupUserAccessRight: role,
+                    principalType: type
+                };
+
+                const response = await apiCall(
+                    `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users`,
+                    { method: 'POST', body: JSON.stringify(payload) }
+                );
+
+                if (response.ok) {
+                    showAlert('User added', 'success');
+                    closeAddUserModal();
+                    // Invalidate cache for this workspace
+                    workspaceUserMap.delete(currentWorkspaceId);
+                    await loadWorkspaceUsers();
+                } else {
+                    throw new Error('Failed to add user');
+                }
+            } catch (error) {
+                showAlert('Error: ' + error.message, 'error');
+            }
+        }
+        
+        async function removeUser(identifier) {
+            const user = allUsers.find(u => u.identifier === identifier);
+            if (!confirm(`Remove ${user.displayName || user.emailAddress}?`)) return;
+
+            try {
+                const response = await apiCall(
+                    `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users/${encodeURIComponent(identifier)}`,
+                    { method: 'DELETE' }
+                );
+
+                if (response.ok) {
+                    showAlert('User removed', 'success');
+                    // Invalidate cache for this workspace
+                    workspaceUserMap.delete(currentWorkspaceId);
+                    await loadWorkspaceUsers();
+                }
+            } catch (error) {
+                showAlert('Error: ' + error.message, 'error');
+            }
+        }
+        
+        // USER VIEW FUNCTIONS
+        async function searchUserByEmail() {
+            const input = document.getElementById('userViewEmailInput');
+            const identifier = input.value.trim();
+            const principalType = input.dataset.principalType || 'User';
+            const storedDisplayName = input.dataset.displayName || '';
+
+            if (!identifier) {
+                showAlert('Please enter an email address or group name', 'error');
+                return;
+            }
+
+            // For users, require @ in email; for groups, allow any identifier
+            const isGroup = principalType === 'Group' || !identifier.includes('@');
+
+            if (!isGroup && !identifier.includes('@')) {
+                showAlert('Please enter a valid email address', 'error');
+                return;
+            }
+
+            // Create user/group object
+            let displayName;
+            if (storedDisplayName) {
+                displayName = storedDisplayName;
+            } else if (identifier.includes('@')) {
+                displayName = identifier.split('@')[0].replace(/[._]/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            } else {
+                displayName = identifier;
+            }
+
+            selectedViewUser = {
+                id: identifier,
+                displayName: displayName,
+                email: identifier,
+                principalType: isGroup ? 'Group' : 'User'
+            };
+
+            // Show selected user/group
+            document.getElementById('selectedUserPanel').style.display = 'block';
+            document.getElementById('selectedUserPanelName').innerHTML = selectedViewUser.displayName +
+                (isGroup ? ' <span style="background: #d4edda; color: #155724; padding: 2px 8px; border-radius: 4px; font-size: 11px;">Group</span>' : '');
+            document.getElementById('selectedUserPanelEmail').textContent = selectedViewUser.email;
+
+            // Clear stored data
+            input.dataset.principalType = '';
+            input.dataset.displayName = '';
+
+            // Load workspaces
+            await loadUserWorkspaces();
+        }
+        
+        async function searchUsersForView() {
+            const searchTerm = document.getElementById('userViewSearch').value.trim();
+            
+            if (searchTerm.length < 2) {
+                document.getElementById('userViewSearchResults').style.display = 'none';
+                return;
+            }
+            
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(async () => {
+                try {
+                    const query = searchTerm.includes('@') 
+                        ? `startswith(mail,'${searchTerm}') or startswith(userPrincipalName,'${searchTerm}')`
+                        : `startswith(displayName,'${searchTerm}')`;
+                    
+                    const response = await fetch(
+                        `https://graph.microsoft.com/v1.0/users?$filter=${encodeURIComponent(query)}&$top=20&$select=id,displayName,mail,userPrincipalName`,
+                        { headers: { 'Authorization': `Bearer ${accessToken}` } }
+                    );
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        displayUserViewSearchResults(data.value);
+                    }
+                } catch (error) {
+                    console.error('Search error:', error);
+                }
+            }, 300);
+        }
+        
+        function displayUserViewSearchResults(users) {
+            const container = document.getElementById('userViewSearchResults');
+            container.innerHTML = '';
+            
+            if (users.length === 0) {
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">No users found</div>';
+                container.style.display = 'block';
+                return;
+            }
+            
+            users.forEach(user => {
+                const div = document.createElement('div');
+                div.className = 'user-search-item';
+                div.onclick = () => selectUserForView(user);
+                div.innerHTML = `
+                    <div class="user-avatar">${getInitials(user.displayName)}</div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600;">${escapeHtml(user.displayName)}</div>
+                        <div style="font-size: 12px; color: #666;">${escapeHtml(user.mail || user.userPrincipalName)}</div>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+            
+            container.style.display = 'block';
+        }
+        
+        async function selectUserForView(user) {
+            selectedViewUser = {
+                id: user.id,
+                displayName: user.displayName,
+                email: user.mail || user.userPrincipalName
+            };
+            
+            document.getElementById('userViewSearch').value = '';
+            document.getElementById('userViewSearchResults').style.display = 'none';
+            document.getElementById('selectedUserPanel').style.display = 'block';
+            document.getElementById('selectedUserPanelAvatar').textContent = getInitials(user.displayName);
+            document.getElementById('selectedUserPanelName').textContent = user.displayName;
+            document.getElementById('selectedUserPanelEmail').textContent = selectedViewUser.email;
+            
+            await loadUserWorkspaces();
+        }
+        
+        async function loadUserWorkspaces() {
+            const tbody = document.getElementById('userWorkspacesTable');
+            tbody.innerHTML = '<tr><td colspan="5"><div class="loading-spinner"></div></td></tr>';
+
+            showAlert('Loading workspace access...', 'info');
+
+            try {
+                if (allWorkspacesCache.length === 0) {
+                    const response = await apiCall('https://api.powerbi.com/v1.0/myorg/groups');
+                    const data = await response.json();
+                    allWorkspacesCache = data.value || [];
+                }
+
+                userWorkspaces = [];
+
+                // If cache is ready, use it for instant lookup
+                if (userCacheBuilt) {
+                    showAlert('Using cached data...', 'info');
+
+                    allWorkspacesCache.forEach(workspace => {
+                        const users = workspaceUserMap.get(workspace.id) || [];
+                        const userAccess = users.find(u => {
+                            // Match by identifier
+                            if (u.identifier === selectedViewUser.id) return true;
+                            // Match by email (case-insensitive)
+                            if (u.emailAddress && u.emailAddress.toLowerCase() === selectedViewUser.email.toLowerCase()) return true;
+                            // Match groups by displayName (case-insensitive)
+                            if (selectedViewUser.principalType === 'Group' && u.displayName &&
+                                u.displayName.toLowerCase() === selectedViewUser.displayName.toLowerCase()) return true;
+                            return false;
+                        });
+
+                        if (userAccess) {
+                            userWorkspaces.push({
+                                id: workspace.id,
+                                name: workspace.name,
+                                type: workspace.type || 'Workspace',
+                                userRole: userAccess.groupUserAccessRight
+                            });
+                        }
+                    });
+                } else {
+                    // Cache not ready - use parallel loading
+                    await loadUserWorkspacesParallel();
+                }
+
+                document.getElementById('workspaceCount').textContent = userWorkspaces.length;
+                document.getElementById('userWorkspacesContainer').style.display = 'block';
+                renderUserWorkspaces();
+                showAlert(`Found ${userWorkspaces.length} workspaces`, 'success');
+            } catch (error) {
+                showAlert('Error: ' + error.message, 'error');
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Error loading workspaces</td></tr>';
+            }
+        }
+
+        // Parallel loading fallback when cache isn't ready
+        async function loadUserWorkspacesParallel() {
+            const BATCH_SIZE = 10;
+            const total = allWorkspacesCache.length;
+
+            for (let i = 0; i < total; i += BATCH_SIZE) {
+                const batch = allWorkspacesCache.slice(i, i + BATCH_SIZE);
+
+                showAlert(`Checking... ${i}/${total}`, 'info');
+
+                // Run batch in parallel
+                const results = await Promise.allSettled(
+                    batch.map(async (workspace) => {
+                        try {
+                            const response = await apiCall(
+                                `https://api.powerbi.com/v1.0/myorg/groups/${workspace.id}/users`
+                            );
+                            if (response.ok) {
+                                const data = await response.json();
+                                return { workspace, users: data.value || [] };
+                            }
+                            return { workspace, users: [] };
+                        } catch (e) {
+                            return { workspace, users: [] };
+                        }
+                    })
+                );
+
+                // Process results
+                results.forEach(result => {
+                    if (result.status === 'fulfilled') {
+                        const { workspace, users } = result.value;
+
+                        // Also populate the cache as we go
+                        workspaceUserMap.set(workspace.id, users);
+                        cacheUsersFromWorkspace(users);
+
+                        const userAccess = users.find(u => {
+                            // Match by identifier
+                            if (u.identifier === selectedViewUser.id) return true;
+                            // Match by email (case-insensitive)
+                            if (u.emailAddress && u.emailAddress.toLowerCase() === selectedViewUser.email.toLowerCase()) return true;
+                            // Match groups by displayName (case-insensitive)
+                            if (selectedViewUser.principalType === 'Group' && u.displayName &&
+                                u.displayName.toLowerCase() === selectedViewUser.displayName.toLowerCase()) return true;
+                            return false;
+                        });
+
+                        if (userAccess) {
+                            userWorkspaces.push({
+                                id: workspace.id,
+                                name: workspace.name,
+                                type: workspace.type || 'Workspace',
+                                userRole: userAccess.groupUserAccessRight
+                            });
+                        }
+                    }
+                });
+
+                // Small delay between batches to avoid rate limiting
+                if (i + BATCH_SIZE < total) {
+                    await sleep(200);
+                }
+            }
+
+            // Mark cache as built if we completed the full scan
+            if (workspaceUserMap.size === allWorkspacesCache.length) {
+                userCacheBuilt = true;
+            }
+        }
+        
+        function renderUserWorkspaces() {
+            const tbody = document.getElementById('userWorkspacesTable');
+            tbody.innerHTML = '';
+            
+            if (userWorkspaces.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No workspace access found</td></tr>';
+                return;
+            }
+            
+            userWorkspaces.forEach(ws => {
+                const tr = document.createElement('tr');
+                const isSelected = selectedWorkspacesForUser.has(ws.id);
+                
+                tr.innerHTML = `
+                    <td class="checkbox-cell">
+                        <input type="checkbox" onchange="toggleWorkspaceSelection('${ws.id}')" 
+                               ${isSelected ? 'checked' : ''}>
+                    </td>
+                    <td><strong>${escapeHtml(ws.name)}</strong></td>
+                    <td><span class="role-badge role-${ws.userRole.toLowerCase()}">${ws.userRole}</span></td>
+                    <td>${ws.type}</td>
+                    <td>
+                        <button onclick="changeUserWorkspaceRole('${ws.id}')" 
+                                style="background: #17a2b8; padding: 6px 12px;">✏️ Change</button>
+                        <button onclick="removeUserFromWorkspace('${ws.id}')" class="button-danger" 
+                                style="padding: 6px 12px;">🗑️</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+            updateUserBulkActions();
+        }
+        
+        function toggleWorkspaceSelection(workspaceId) {
+            if (selectedWorkspacesForUser.has(workspaceId)) {
+                selectedWorkspacesForUser.delete(workspaceId);
+            } else {
+                selectedWorkspacesForUser.add(workspaceId);
+            }
+            updateUserBulkActions();
+        }
+        
+        function toggleAllUserWorkspaces(checked) {
+            selectedWorkspacesForUser.clear();
+            if (checked) {
+                userWorkspaces.forEach(ws => selectedWorkspacesForUser.add(ws.id));
+            }
+            renderUserWorkspaces();
+        }
+        
+        function updateUserBulkActions() {
+            const div = document.getElementById('userBulkActions');
+            const count = selectedWorkspacesForUser.size;
+            
+            if (count > 0) {
+                div.style.display = 'flex';
+                document.getElementById('selectedWorkspacesCount').textContent = `${count} selected`;
+            } else {
+                div.style.display = 'none';
+            }
+        }
+        
+        async function changeUserWorkspaceRole(workspaceId) {
+            const workspace = userWorkspaces.find(w => w.id === workspaceId);
+            const newRole = prompt(`Change role from ${workspace.userRole} to:\nEnter: Admin, Member, Contributor, or Viewer`, workspace.userRole);
+
+            if (!newRole || newRole === workspace.userRole) return;
+
+            const validRoles = ['Admin', 'Member', 'Contributor', 'Viewer'];
+            if (!validRoles.includes(newRole)) {
+                showAlert('Invalid role', 'error');
+                return;
+            }
+
+            const isGroup = selectedViewUser.principalType === 'Group';
+            const requestBody = {
+                groupUserAccessRight: newRole,
+                principalType: selectedViewUser.principalType || 'User',
+                identifier: selectedViewUser.id
+            };
+
+            // For users, also include emailAddress
+            if (!isGroup && selectedViewUser.email) {
+                requestBody.emailAddress = selectedViewUser.email;
+            }
+
+            try {
+                const response = await apiCall(
+                    `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`,
+                    {
+                        method: 'PUT',
+                        body: JSON.stringify(requestBody)
+                    }
+                );
+
+                if (response.ok) {
+                    showAlert(`Role changed to ${newRole}`, 'success');
+                    // Invalidate cache for this workspace
+                    workspaceUserMap.delete(workspaceId);
+                    await loadUserWorkspaces();
+                }
+            } catch (error) {
+                showAlert('Error: ' + error.message, 'error');
+            }
+        }
+
+        async function removeUserFromWorkspace(workspaceId) {
+            const workspace = userWorkspaces.find(w => w.id === workspaceId);
+
+            if (!confirm(`Remove ${selectedViewUser.displayName} from "${workspace.name}"?`)) return;
+
+            // For groups, use identifier; for users, use email or id
+            const userIdentifier = selectedViewUser.id;
+
+            try {
+                const response = await apiCall(
+                    `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users/${encodeURIComponent(userIdentifier)}`,
+                    { method: 'DELETE' }
+                );
+                
+                if (response.ok) {
+                    showAlert('Removed from workspace', 'success');
+                    // Invalidate cache for this workspace
+                    workspaceUserMap.delete(workspaceId);
+                    await loadUserWorkspaces();
+                }
+            } catch (error) {
+                showAlert('Error: ' + error.message, 'error');
+            }
+        }
+
+        function showAddWorkspaceAccessModal() {
+            document.getElementById('modalUserName').textContent = selectedViewUser.displayName;
+            
+            const availableWorkspaces = allWorkspacesCache.filter(ws => 
+                !userWorkspaces.find(uw => uw.id === ws.id)
+            );
+            
+            const container = document.getElementById('availableWorkspacesList');
+            container.innerHTML = '';
+            
+            if (availableWorkspaces.length === 0) {
+                container.innerHTML = '<p style="padding: 20px; text-align: center; color: #999;">User has access to all workspaces</p>';
+            } else {
+                availableWorkspaces.forEach(ws => {
+                    const div = document.createElement('div');
+                    div.style.padding = '10px';
+                    div.style.borderBottom = '1px solid #f0f0f0';
+                    div.innerHTML = `
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" value="${ws.id}" style="margin-right: 10px;">
+                            <span><strong>${escapeHtml(ws.name)}</strong></span>
+                        </label>
+                    `;
+                    container.appendChild(div);
+                });
+            }
+            
+            document.getElementById('addWorkspaceAccessModal').classList.add('active');
+        }
+        
+        function closeAddWorkspaceAccessModal() {
+            document.getElementById('addWorkspaceAccessModal').classList.remove('active');
+        }
+        
+        function filterAvailableWorkspaces() {
+            const searchTerm = document.getElementById('workspaceSearchInput').value.toLowerCase();
+            const items = document.querySelectorAll('#availableWorkspacesList > div');
+            
+            items.forEach(div => {
+                const text = div.textContent.toLowerCase();
+                div.style.display = text.includes(searchTerm) ? 'block' : 'none';
+            });
+        }
+        
+        async function addUserToSelectedWorkspaces() {
+            const checkboxes = document.querySelectorAll('#availableWorkspacesList input:checked');
+            const workspaceIds = Array.from(checkboxes).map(cb => cb.value);
+
+            if (workspaceIds.length === 0) {
+                showAlert('Select at least one workspace', 'error');
+                return;
+            }
+
+            const role = document.getElementById('bulkWorkspaceRole').value;
+            const isGroup = selectedViewUser.principalType === 'Group';
+
+            if (!confirm(`Add ${selectedViewUser.displayName} to ${workspaceIds.length} workspace(s) as ${role}?`)) return;
+
+            let successCount = 0;
+
+            for (const workspaceId of workspaceIds) {
+                try {
+                    const requestBody = {
+                        groupUserAccessRight: role,
+                        principalType: selectedViewUser.principalType || 'User',
+                        identifier: selectedViewUser.id
+                    };
+
+                    // For users, also include emailAddress
+                    if (!isGroup && selectedViewUser.email) {
+                        requestBody.emailAddress = selectedViewUser.email;
+                    }
+
+                    const response = await apiCall(
+                        `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`,
+                        {
+                            method: 'POST',
+                            body: JSON.stringify(requestBody)
+                        }
+                    );
+
+                    if (response.ok) {
+                        successCount++;
+                        // Invalidate cache for this workspace
+                        workspaceUserMap.delete(workspaceId);
+                    } else {
+                        const errorData = await response.json().catch(() => ({}));
+                        console.error('API Error:', errorData);
+                    }
+                    await sleep(500);
+                } catch (error) {
+                    console.error('Error:', error);
+                }
+            }
+
+            showAlert(`Added to ${successCount} workspace(s)`, 'success');
+            closeAddWorkspaceAccessModal();
+            await loadUserWorkspaces();
+        }
+
+        async function bulkChangeUserRole(newRole) {
+            if (selectedWorkspacesForUser.size === 0) return;
+
+            if (!confirm(`Change role to ${newRole} for ${selectedWorkspacesForUser.size} workspace(s)?`)) return;
+
+            let successCount = 0;
+            const isGroup = selectedViewUser.principalType === 'Group';
+
+            for (const workspaceId of selectedWorkspacesForUser) {
+                try {
+                    const requestBody = {
+                        groupUserAccessRight: newRole,
+                        principalType: selectedViewUser.principalType || 'User',
+                        identifier: selectedViewUser.id
+                    };
+
+                    // For users, also include emailAddress
+                    if (!isGroup && selectedViewUser.email) {
+                        requestBody.emailAddress = selectedViewUser.email;
+                    }
+
+                    const response = await apiCall(
+                        `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`,
+                        {
+                            method: 'PUT',
+                            body: JSON.stringify(requestBody)
+                        }
+                    );
+
+                    if (response.ok) {
+                        successCount++;
+                        // Invalidate cache for this workspace
+                        workspaceUserMap.delete(workspaceId);
+                    }
+                    await sleep(500);
+                } catch (error) {
+                    console.error('Error:', error);
+                }
+            }
+
+            showAlert(`Changed ${successCount} roles`, 'success');
+            selectedWorkspacesForUser.clear();
+            await loadUserWorkspaces();
+        }
+
+        async function bulkRemoveUserFromWorkspaces() {
+            if (selectedWorkspacesForUser.size === 0) return;
+
+            if (!confirm(`Remove ${selectedViewUser.displayName} from ${selectedWorkspacesForUser.size} workspace(s)?`)) return;
+
+            let successCount = 0;
+            // For groups, use identifier; for users, use email
+            const userIdentifier = selectedViewUser.id;
+
+            for (const workspaceId of selectedWorkspacesForUser) {
+                try {
+                    const response = await apiCall(
+                        `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users/${encodeURIComponent(userIdentifier)}`,
+                        { method: 'DELETE' }
+                    );
+
+                    if (response.ok) {
+                        successCount++;
+                        // Invalidate cache for this workspace
+                        workspaceUserMap.delete(workspaceId);
+                    }
+                    await sleep(500);
+                } catch (error) {
+                    console.error('Error:', error);
+                }
+            }
+
+            showAlert(`Removed from ${successCount} workspace(s)`, 'success');
+            selectedWorkspacesForUser.clear();
+            await loadUserWorkspaces();
+        }
+        
+        function clearUserSelection() {
+            selectedViewUser = null;
+            userWorkspaces = [];
+            selectedWorkspacesForUser.clear();
+            document.getElementById('userViewEmailInput').value = '';
+            document.getElementById('selectedUserPanel').style.display = 'none';
+            document.getElementById('userWorkspacesContainer').style.display = 'none';
+        }
+        
+        // UTILITY FUNCTIONS
+        async function apiCall(url, options = {}) {
+            if (!accessToken) throw new Error('Not authenticated');
+            
+            const defaultOptions = {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            };
+            
+            return fetch(url, { ...defaultOptions, ...options });
+        }
+        
+        function showAlert(message, type = 'info') {
+            const alert = document.createElement('div');
+            alert.className = `alert ${type}`;
+            alert.textContent = message;
+            document.body.appendChild(alert);
+            
+            setTimeout(() => alert.remove(), 4000);
+        }
+        
+        function escapeHtml(text) {
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return String(text).replace(/[&<>"']/g, m => map[m]);
+        }
+        
+        function getInitials(name) {
+            if (!name) return '?';
+            const parts = name.split(' ');
+            if (parts.length >= 2) return (parts[0][0] + parts[parts.length-1][0]).toUpperCase();
+            return name.substring(0, 2).toUpperCase();
+        }
+        
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // WORKSPACE SUGGESTIONS
+        function showWorkspaceSuggestions() {
+            const input = document.getElementById('workspaceSearch');
+            const dropdown = document.getElementById('workspaceSuggestions');
+            const searchTerm = input.value.trim().toLowerCase();
+
+            if (searchTerm.length === 0 || allWorkspaces.length === 0) {
+                dropdown.style.display = 'none';
+                return;
+            }
+
+            const matches = allWorkspaces
+                .filter(ws => ws.name.toLowerCase().includes(searchTerm))
+                .slice(0, 10);
+
+            if (matches.length === 0) {
+                dropdown.style.display = 'none';
+                return;
+            }
+
+            dropdown.innerHTML = matches.map(ws => `
+                <div class="user-search-item" onclick="selectWorkspaceSuggestion('${ws.id}')">
+                    <div style="width: 32px; height: 32px; border-radius: 6px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">📁</div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600;">${escapeHtml(ws.name)}</div>
+                        <div style="font-size: 11px; color: #666;">${ws.type || 'Workspace'}</div>
+                    </div>
+                </div>
+            `).join('');
+
+            dropdown.style.display = 'block';
+        }
+
+        function hideWorkspaceSuggestions() {
+            setTimeout(() => {
+                document.getElementById('workspaceSuggestions').style.display = 'none';
+            }, 200);
+        }
+
+        function selectWorkspaceSuggestion(workspaceId) {
+            const workspace = allWorkspaces.find(ws => ws.id === workspaceId);
+            if (workspace) {
+                document.getElementById('workspaceSearch').value = workspace.name;
+                hideWorkspaceSuggestions();
+                selectWorkspace(workspace);
+            }
+        }
+
+        // USER SUGGESTIONS (includes Groups)
+        function showUserSuggestions() {
+            const input = document.getElementById('userViewEmailInput');
+            const dropdown = document.getElementById('userSuggestions');
+            const searchTerm = input.value.trim().toLowerCase();
+
+            if (searchTerm.length === 0 || knownUsers.size === 0) {
+                dropdown.style.display = 'none';
+                return;
+            }
+
+            const matches = Array.from(knownUsers.values())
+                .filter(user =>
+                    (user.displayName && user.displayName.toLowerCase().includes(searchTerm)) ||
+                    (user.email && user.email.toLowerCase().includes(searchTerm))
+                )
+                .slice(0, 15);
+
+            if (matches.length === 0) {
+                dropdown.style.display = 'none';
+                return;
+            }
+
+            dropdown.innerHTML = matches.map(user => {
+                const isGroup = user.principalType === 'Group';
+                const avatarStyle = isGroup
+                    ? 'background: linear-gradient(135deg, #28a745 0%, #20c997 100%);'
+                    : '';
+                const avatarContent = isGroup ? '👥' : getInitials(user.displayName);
+                const typeLabel = isGroup
+                    ? '<span style="background: #d4edda; color: #155724; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 8px;">Group</span>'
+                    : '';
+
+                return `
+                    <div class="user-search-item" onclick="selectUserSuggestion('${escapeHtml(user.email)}', '${user.principalType || 'User'}', '${escapeHtml(user.displayName)}')">
+                        <div class="user-avatar" style="${avatarStyle}">${avatarContent}</div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600;">${escapeHtml(user.displayName)}${typeLabel}</div>
+                            <div style="font-size: 11px; color: #666;">${escapeHtml(user.email)}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            dropdown.style.display = 'block';
+        }
+
+        function hideUserSuggestions() {
+            setTimeout(() => {
+                document.getElementById('userSuggestions').style.display = 'none';
+            }, 200);
+        }
+
+        function selectUserSuggestion(identifier, principalType = 'User', displayName = '') {
+            document.getElementById('userViewEmailInput').value = identifier;
+            document.getElementById('userViewEmailInput').dataset.principalType = principalType;
+            document.getElementById('userViewEmailInput').dataset.displayName = displayName;
+            hideUserSuggestions();
+            searchUserByEmail();
+        }
+
+        // Cache users and groups from workspace
+        function cacheUsersFromWorkspace(users) {
+            users.forEach(user => {
+                const email = user.emailAddress || user.identifier;
+                const principalType = user.principalType || 'User';
+
+                // Cache users with email
+                if (email && email.includes('@')) {
+                    knownUsers.set(email.toLowerCase(), {
+                        displayName: user.displayName || email.split('@')[0],
+                        email: email,
+                        principalType: principalType,
+                        identifier: user.identifier
+                    });
+                }
+
+                // Also cache groups (they don't have @ in identifier)
+                if (principalType === 'Group' && user.displayName) {
+                    const groupKey = `group:${user.identifier}`.toLowerCase();
+                    knownUsers.set(groupKey, {
+                        displayName: user.displayName,
+                        email: user.identifier, // Groups use identifier instead of email
+                        principalType: 'Group',
+                        identifier: user.identifier
+                    });
+                }
+            });
+        }
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#workspaceSearch') && !e.target.closest('#workspaceSuggestions')) {
+                document.getElementById('workspaceSuggestions').style.display = 'none';
+            }
+            if (!e.target.closest('#userViewEmailInput') && !e.target.closest('#userSuggestions')) {
+                document.getElementById('userSuggestions').style.display = 'none';
+            }
+        });
+
+        // Initialize on page load
+        window.addEventListener('load', async () => {
+            // Check for cached token from previous session
+            const cached = sessionStorage.getItem('pbi_token');
+            if (cached && cached.startsWith('eyJ')) {
+                document.getElementById('manualToken').value = cached;
+                authenticateWithToken();
+            }
+        });
+    </script>
 </body>
 </html>
