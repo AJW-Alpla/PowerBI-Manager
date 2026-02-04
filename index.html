@@ -592,6 +592,8 @@
         let accessToken = null;
         let tokenExpiry = null;
         let currentWorkspaceId = null;
+        let currentUserEmail = null; // Current authenticated user's email
+        let currentUserRole = null; // Current user's role in selected workspace
         let allUsers = [];
         let allUsersById = new Map(); // O(1) lookup index for users by identifier
         let selectedUsers = new Set();
@@ -696,15 +698,31 @@
 
                     closeAuthModal();
                     showAlert('Authentication successful!', 'success');
+
+                    // Get current user email from token
+                    getCurrentUserFromToken(token);
+
                     await loadWorkspaces();
                 } else {
                     throw new Error('Invalid token');
                 }
             } catch (error) {
-                showAlert('Authentication failed: ' + error.message, 'error');
+                showAlert('Authentication failed', 'error');
             }
         }
-        
+
+        // Get current user email from JWT token
+        function getCurrentUserFromToken(token) {
+            try {
+                const payload = token.split('.')[1];
+                const decoded = JSON.parse(atob(payload));
+                currentUserEmail = decoded.upn || decoded.unique_name || decoded.email;
+            } catch (error) {
+                console.error('Failed to decode token:', error);
+                currentUserEmail = null;
+            }
+        }
+
         // VIEW SWITCHER
         function switchView(view) {
             currentView = view;
@@ -874,6 +892,7 @@
                 if (workspaceUserMap.has(currentWorkspaceId)) {
                     allUsers = workspaceUserMap.get(currentWorkspaceId);
                     buildUserIndex();
+                    updateCurrentUserRole();
                     renderUsers();
                     return;
                 }
@@ -889,6 +908,10 @@
                 // Update cache
                 workspaceUserMap.set(currentWorkspaceId, allUsers);
                 cacheUsersFromWorkspace(allUsers);
+
+                // Determine current user's role in this workspace
+                updateCurrentUserRole();
+
                 renderUsers();
             } catch (error) {
                 showAlert('Error loading users', 'error');
@@ -901,7 +924,95 @@
             allUsersById.clear();
             allUsers.forEach(user => allUsersById.set(user.identifier, user));
         }
-        
+
+        // Update current user's role in the selected workspace
+        function updateCurrentUserRole() {
+            currentUserRole = null;
+            if (!currentUserEmail || !allUsers) return;
+
+            // Find current user in workspace users list
+            const currentUser = allUsers.find(user =>
+                user.emailAddress?.toLowerCase() === currentUserEmail.toLowerCase() ||
+                user.identifier?.toLowerCase() === currentUserEmail.toLowerCase()
+            );
+
+            if (currentUser) {
+                currentUserRole = currentUser.groupUserAccessRight;
+            }
+
+            // Update UI based on permissions
+            updateUIPermissions();
+        }
+
+        // Check if current user can edit workspace (Admin or Member role required)
+        function canEditWorkspace() {
+            if (!currentUserRole) return false;
+            return currentUserRole === 'Admin' || currentUserRole === 'Member';
+        }
+
+        // Check if current user can edit a specific workspace by ID
+        function canEditWorkspaceById(workspaceId) {
+            if (!currentUserEmail || !workspaceId) return false;
+
+            // Get users for this workspace from cache
+            const users = workspaceUserMap.get(workspaceId);
+            if (!users) return false;
+
+            // Find current user in workspace users
+            const currentUser = users.find(user =>
+                user.emailAddress?.toLowerCase() === currentUserEmail.toLowerCase() ||
+                user.identifier?.toLowerCase() === currentUserEmail.toLowerCase()
+            );
+
+            if (!currentUser) return false;
+
+            // Check if user has Admin or Member role
+            const role = currentUser.groupUserAccessRight;
+            return role === 'Admin' || role === 'Member';
+        }
+
+        // Update UI elements based on user permissions
+        function updateUIPermissions() {
+            const hasEditPermission = canEditWorkspace();
+
+            // Add User button
+            const addUserBtn = document.getElementById('addUserBtn');
+            if (addUserBtn) {
+                addUserBtn.disabled = !hasEditPermission;
+                addUserBtn.style.opacity = hasEditPermission ? '1' : '0.5';
+                addUserBtn.style.cursor = hasEditPermission ? 'pointer' : 'not-allowed';
+                addUserBtn.title = hasEditPermission ? '' : 'You need Admin or Member role to manage users';
+            }
+
+            // Bulk action buttons
+            const bulkButtons = document.querySelectorAll('#bulkActionsContainer button');
+            bulkButtons.forEach(btn => {
+                btn.disabled = !hasEditPermission;
+                btn.style.opacity = hasEditPermission ? '1' : '0.5';
+                btn.style.cursor = hasEditPermission ? 'pointer' : 'not-allowed';
+                if (!hasEditPermission) {
+                    btn.title = 'You need Admin or Member role to manage users';
+                }
+            });
+
+            // Apply/Cancel pending changes buttons
+            const applyBtn = document.querySelector('[onclick="applyPendingRoleChanges()"]');
+            const cancelBtn = document.querySelector('[onclick="cancelPendingRoleChanges()"]');
+            if (applyBtn) {
+                applyBtn.disabled = !hasEditPermission;
+                applyBtn.style.opacity = hasEditPermission ? '1' : '0.5';
+                applyBtn.style.cursor = hasEditPermission ? 'pointer' : 'not-allowed';
+                if (!hasEditPermission) {
+                    applyBtn.title = 'You need Admin or Member role to apply changes';
+                }
+            }
+            if (cancelBtn) {
+                cancelBtn.disabled = !hasEditPermission;
+                cancelBtn.style.opacity = hasEditPermission ? '1' : '0.5';
+                cancelBtn.style.cursor = hasEditPermission ? 'pointer' : 'not-allowed';
+            }
+        }
+
         function renderUsers() {
             const tbody = document.getElementById('userTableBody');
             tbody.innerHTML = '';
@@ -921,6 +1032,8 @@
             // Use DocumentFragment for batch DOM insertion
             const fragment = document.createDocumentFragment();
 
+            const hasEditPermission = canEditWorkspace();
+
             sortedUsers.forEach(user => {
                 const tr = document.createElement('tr');
                 const initials = getInitials(user.displayName || user.emailAddress);
@@ -932,7 +1045,8 @@
                 tr.innerHTML = `
                     <td class="checkbox-cell">
                         <input type="checkbox" data-action="toggle-user" data-identifier="${escapedIdentifier}"
-                               ${selectedUsers.has(user.identifier) ? 'checked' : ''}>
+                               ${selectedUsers.has(user.identifier) ? 'checked' : ''}
+                               ${!hasEditPermission ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}>
                     </td>
                     <td>
                         <div style="display: flex; align-items: center; gap: 12px;">
@@ -948,10 +1062,11 @@
                     <td>
                         <div style="display: flex; gap: 10px;">
                             ${['Admin', 'Member', 'Contributor', 'Viewer'].map(role => `
-                                <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                <label style="display: flex; align-items: center; gap: 4px; cursor: ${hasEditPermission ? 'pointer' : 'not-allowed'}; opacity: ${hasEditPermission ? '1' : '0.5'};" title="${!hasEditPermission ? 'You need Admin or Member role to change roles' : ''}">
                                     <input type="radio" name="role-${user.identifier}" value="${role}"
                                            data-action="stage-role" data-identifier="${escapedIdentifier}" data-role="${role}"
-                                           ${displayRole === role ? 'checked' : ''}>
+                                           ${displayRole === role ? 'checked' : ''}
+                                           ${!hasEditPermission ? 'disabled' : ''}>
                                     <span style="font-size: 13px;">${role}</span>
                                 </label>
                             `).join('')}
@@ -959,7 +1074,8 @@
                     </td>
                     <td>
                         <button data-action="remove-user" data-identifier="${escapedIdentifier}" class="button-danger"
-                                style="padding: 6px 12px; font-size: 13px;">🗑️</button>
+                                style="padding: 6px 12px; font-size: 13px; opacity: ${hasEditPermission ? '1' : '0.5'}; cursor: ${hasEditPermission ? 'pointer' : 'not-allowed'};"
+                                ${!hasEditPermission ? 'disabled title="You need Admin or Member role to remove users"' : ''}>🗑️</button>
                     </td>
                 `;
                 fragment.appendChild(tr);
@@ -999,6 +1115,12 @@
         }
         
         async function bulkSetRole(newRole) {
+            // Check permission first
+            if (!canEditWorkspace()) {
+                showAlert('You need Admin or Member role to change roles', 'error');
+                return;
+            }
+
             if (selectedUsers.size === 0) return;
 
             if (!confirm(`Set role to ${newRole} for ${selectedUsers.size} user(s)?`)) return;
@@ -1045,6 +1167,12 @@
         }
 
         async function bulkRemoveUsers() {
+            // Check permission first
+            if (!canEditWorkspace()) {
+                showAlert('You need Admin or Member role to remove users', 'error');
+                return;
+            }
+
             if (selectedUsers.size === 0) return;
 
             if (!confirm(`Remove ${selectedUsers.size} user(s) from this workspace?`)) return;
@@ -1107,9 +1235,9 @@
             if (failureCount === 0) {
                 showAlert(`✓ Successfully removed ${successCount} user(s)`, 'success');
             } else if (successCount === 0) {
-                showAlert(`✗ Failed to remove all ${failureCount} user(s). ${errors[0]}`, 'error');
+                showAlert(`✗ Failed to remove users`, 'error');
             } else {
-                showAlert(`⚠ Partially completed: ${successCount} removed, ${failureCount} failed. First error: ${errors[0]}`, 'error');
+                showAlert(`⚠ Partially completed: ${successCount} removed, ${failureCount} failed`, 'error');
             }
 
             // Log all errors to console for debugging
@@ -1163,6 +1291,12 @@
         }
         
         async function applyPendingRoleChanges() {
+            // Check permission first
+            if (!canEditWorkspace()) {
+                showAlert('You need Admin or Member role to apply changes', 'error');
+                return;
+            }
+
             if (pendingRoleChanges.size === 0) return;
 
             if (!confirm(`Apply ${pendingRoleChanges.size} role change(s)?`)) return;
@@ -1234,9 +1368,9 @@
             if (failureCount === 0) {
                 showAlert(`✓ Successfully applied ${successCount} change(s)`, 'success');
             } else if (successCount === 0) {
-                showAlert(`✗ Failed to apply all ${failureCount} change(s). ${errors[0]}`, 'error');
+                showAlert(`✗ Failed to apply changes`, 'error');
             } else {
-                showAlert(`⚠ Partially completed: ${successCount} applied, ${failureCount} failed. First error: ${errors[0]}`, 'error');
+                showAlert(`⚠ Partially completed: ${successCount} applied, ${failureCount} failed`, 'error');
             }
 
             // Log all errors to console for debugging
@@ -1331,6 +1465,12 @@
         }
 
         async function addUser() {
+            // Check permission first
+            if (!canEditWorkspace()) {
+                showAlert('You need Admin or Member role to add users', 'error');
+                return;
+            }
+
             const email = document.getElementById('newUserEmail').value.trim();
             const role = document.getElementById('newUserRole').value;
             const type = document.getElementById('newUserType').value;
@@ -1365,12 +1505,18 @@
                     throw new Error('Failed to add user');
                 }
             } catch (error) {
-                showAlert('Error: ' + error.message, 'error');
+                showAlert('Failed to add user', 'error');
                 cacheBuildingPaused = false;
             }
         }
 
         async function removeUser(identifier) {
+            // Check permission first
+            if (!canEditWorkspace()) {
+                showAlert('You need Admin or Member role to remove users', 'error');
+                return;
+            }
+
             const user = allUsersById.get(identifier);
             if (!user || !confirm(`Remove ${user.displayName || user.emailAddress}?`)) return;
 
@@ -1389,7 +1535,7 @@
                     cacheBuildingPaused = false;
                 }
             } catch (error) {
-                showAlert('Error: ' + error.message, 'error');
+                showAlert('Failed to remove user', 'error');
                 cacheBuildingPaused = false;
             }
         }
@@ -1573,7 +1719,7 @@
                 renderUserWorkspaces();
                 showAlert(`Found ${userWorkspaces.length} workspaces`, 'success');
             } catch (error) {
-                showAlert('Error: ' + error.message, 'error');
+                showAlert('Failed to load workspaces', 'error');
                 tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Error loading workspaces</td></tr>';
             }
         }
@@ -1677,19 +1823,25 @@
                 const isSelected = selectedWorkspacesForUser.has(ws.id);
                 const escapedId = escapeHtml(ws.id);
 
+                // Check if current user has edit permission for this workspace
+                const hasEditPermission = canEditWorkspaceById(ws.id);
+
                 tr.innerHTML = `
                     <td class="checkbox-cell">
                         <input type="checkbox" data-action="toggle-workspace" data-workspace-id="${escapedId}"
-                               ${isSelected ? 'checked' : ''}>
+                               ${isSelected ? 'checked' : ''}
+                               ${!hasEditPermission ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}>
                     </td>
                     <td><strong>${escapeHtml(ws.name)}</strong></td>
                     <td><span class="role-badge role-${ws.userRole.toLowerCase()}">${ws.userRole}</span></td>
                     <td>${ws.type}</td>
                     <td>
                         <button data-action="change-workspace-role" data-workspace-id="${escapedId}"
-                                style="background: #17a2b8; padding: 6px 12px;">✏️ Change</button>
+                                style="background: #17a2b8; padding: 6px 12px; opacity: ${hasEditPermission ? '1' : '0.5'}; cursor: ${hasEditPermission ? 'pointer' : 'not-allowed'};"
+                                ${!hasEditPermission ? 'disabled title="You need Admin or Member role in this workspace to change roles"' : ''}>✏️ Change</button>
                         <button data-action="remove-from-workspace" data-workspace-id="${escapedId}" class="button-danger"
-                                style="padding: 6px 12px;">🗑️</button>
+                                style="padding: 6px 12px; opacity: ${hasEditPermission ? '1' : '0.5'}; cursor: ${hasEditPermission ? 'pointer' : 'not-allowed'};"
+                                ${!hasEditPermission ? 'disabled title="You need Admin or Member role in this workspace to remove users"' : ''}>🗑️</button>
                     </td>
                 `;
                 fragment.appendChild(tr);
@@ -1719,16 +1871,36 @@
         function updateUserBulkActions() {
             const div = document.getElementById('userBulkActions');
             const count = selectedWorkspacesForUser.size;
-            
+
             if (count > 0) {
                 div.style.display = 'flex';
                 document.getElementById('selectedWorkspacesCount').textContent = `${count} selected`;
+
+                // Check if user has permission for at least one selected workspace
+                const hasAnyPermission = Array.from(selectedWorkspacesForUser).some(wsId => canEditWorkspaceById(wsId));
+
+                // Disable bulk action buttons if no permissions
+                const bulkButtons = div.querySelectorAll('button');
+                bulkButtons.forEach(btn => {
+                    btn.disabled = !hasAnyPermission;
+                    btn.style.opacity = hasAnyPermission ? '1' : '0.5';
+                    btn.style.cursor = hasAnyPermission ? 'pointer' : 'not-allowed';
+                    if (!hasAnyPermission) {
+                        btn.title = 'You need Admin or Member role in selected workspaces to perform this action';
+                    }
+                });
             } else {
                 div.style.display = 'none';
             }
         }
         
         async function changeUserWorkspaceRole(workspaceId) {
+            // Check permission first
+            if (!canEditWorkspaceById(workspaceId)) {
+                showAlert('You need Admin or Member role in this workspace', 'error');
+                return;
+            }
+
             const workspace = userWorkspacesById.get(workspaceId);
             if (!workspace) return;
             const newRole = prompt(`Change role from ${workspace.userRole} to:\nEnter: Admin, Member, Contributor, or Viewer`, workspace.userRole);
@@ -1778,11 +1950,17 @@
                     await loadUserWorkspaces();
                 }
             } catch (error) {
-                showAlert('Error: ' + error.message, 'error');
+                showAlert('Failed to change role', 'error');
             }
         }
 
         async function removeUserFromWorkspace(workspaceId) {
+            // Check permission first
+            if (!canEditWorkspaceById(workspaceId)) {
+                showAlert('You need Admin or Member role in this workspace', 'error');
+                return;
+            }
+
             const workspace = userWorkspacesById.get(workspaceId);
             if (!workspace) return;
 
@@ -1817,7 +1995,7 @@
                 }
             } catch (error) {
                 cacheBuildingPaused = false;
-                showAlert('Error: ' + error.message, 'error');
+                showAlert('Failed to remove user', 'error');
             }
         }
 
@@ -1942,9 +2120,9 @@
             if (failureCount === 0) {
                 showAlert(`✓ Successfully added to ${successCount} workspace(s)`, 'success');
             } else if (successCount === 0) {
-                showAlert(`✗ Failed to add to all ${failureCount} workspace(s). ${errors[0]}`, 'error');
+                showAlert(`✗ Failed to add to workspaces`, 'error');
             } else {
-                showAlert(`⚠ Partially completed: Added to ${successCount} workspace(s), ${failureCount} failed. First error: ${errors[0]}`, 'error');
+                showAlert(`⚠ Partially completed: Added to ${successCount} workspace(s), ${failureCount} failed`, 'error');
             }
 
             // Log all errors to console for debugging
@@ -2041,9 +2219,9 @@
             if (failureCount === 0) {
                 showAlert(`✓ Successfully changed ${successCount} role(s) to ${newRole}`, 'success');
             } else if (successCount === 0) {
-                showAlert(`✗ Failed to change all ${failureCount} role(s). ${errors[0]}`, 'error');
+                showAlert(`✗ Failed to change roles`, 'error');
             } else {
-                showAlert(`⚠ Partially completed: ${successCount} changed, ${failureCount} failed. First error: ${errors[0]}`, 'error');
+                showAlert(`⚠ Partially completed: ${successCount} changed, ${failureCount} failed`, 'error');
             }
 
             // Log all errors to console for debugging
@@ -2128,9 +2306,9 @@
             if (failureCount === 0) {
                 showAlert(`✓ Successfully removed from ${successCount} workspace(s)`, 'success');
             } else if (successCount === 0) {
-                showAlert(`✗ Failed to remove from all ${failureCount} workspace(s). ${errors[0]}`, 'error');
+                showAlert(`✗ Failed to remove from workspaces`, 'error');
             } else {
-                showAlert(`⚠ Partially completed: Removed from ${successCount} workspace(s), ${failureCount} failed. First error: ${errors[0]}`, 'error');
+                showAlert(`⚠ Partially completed: Removed from ${successCount} workspace(s), ${failureCount} failed`, 'error');
             }
 
             // Log all errors to console for debugging
