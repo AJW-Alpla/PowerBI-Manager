@@ -359,7 +359,7 @@
                 </div>
                 
                 <!-- Bulk Actions Bar -->
-                <div id="workspaceBulkActions" style="display: none; gap: 10px; padding: 15px; background: #fff3e6; 
+                <div id="workspaceBulkActions" style="display: none; gap: 10px; padding: 15px; background: #fff3e6;
                      border: 2px solid #ff6b00; border-radius: 6px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
                     <span id="selectedUsersCount" style="font-weight: 600; color: #ff6b00;">0 selected</span>
                     <button onclick="bulkSetRole('Admin')">Set Admin</button>
@@ -368,7 +368,23 @@
                     <button onclick="bulkSetRole('Viewer')">Set Viewer</button>
                     <button onclick="bulkRemoveUsers()" class="button-danger">Remove from Selected</button>
                 </div>
-                
+
+                <!-- Group Permissions Warning -->
+                <div id="groupPermissionsWarning" style="display: none; padding: 12px 15px; background: #e7f3ff;
+                     border-left: 4px solid #0078d4; border-radius: 4px; margin-bottom: 20px;">
+                    <div style="display: flex; align-items: start; gap: 10px;">
+                        <span style="font-size: 20px;">ℹ️</span>
+                        <div style="flex: 1;">
+                            <strong style="color: #0078d4;">Group-Based Permissions Detected</strong>
+                            <p style="margin: 5px 0 0 0; font-size: 13px; color: #555;">
+                                This workspace has groups with Admin/Member permissions. You don't have direct user access,
+                                but if you're a member of these groups, you may have permissions. Actions are enabled to allow
+                                group-based access - the PowerBI API will validate your actual permissions when you perform actions.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
                 <table id="usersTable">
                     <thead>
                         <tr>
@@ -930,7 +946,7 @@
             currentUserRole = null;
             if (!currentUserEmail || !allUsers) return;
 
-            // Find current user in workspace users list
+            // Find current user in workspace users list (direct assignment)
             const currentUser = allUsers.find(user =>
                 user.emailAddress?.toLowerCase() === currentUserEmail.toLowerCase() ||
                 user.identifier?.toLowerCase() === currentUserEmail.toLowerCase()
@@ -940,14 +956,73 @@
                 currentUserRole = currentUser.groupUserAccessRight;
             }
 
+            // Check if there are groups with Admin/Member permissions
+            const groups = allUsers.filter(u => u.principalType === 'Group');
+            const adminOrMemberGroups = groups.filter(g =>
+                g.groupUserAccessRight === 'Admin' || g.groupUserAccessRight === 'Member'
+            );
+
+            // Show warning if groups exist and user doesn't have direct permissions
+            const warningDiv = document.getElementById('groupPermissionsWarning');
+            if (warningDiv) {
+                if (adminOrMemberGroups.length > 0 && !currentUserRole) {
+                    warningDiv.style.display = 'block';
+                    console.info('Groups with Admin/Member permissions in this workspace:',
+                        adminOrMemberGroups.map(g => g.displayName || g.identifier));
+                } else {
+                    warningDiv.style.display = 'none';
+                }
+            }
+
             // Update UI based on permissions
             updateUIPermissions();
         }
 
+        // Test actual permissions by attempting to read workspace users
+        async function testWorkspacePermissions() {
+            if (!currentWorkspaceId) return false;
+
+            try {
+                // Attempt to read workspace users - this requires at least Viewer access
+                const response = await apiCall(
+                    `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users`
+                );
+
+                if (response.ok) {
+                    // If we can read users, we have at least Viewer access
+                    // For write operations, the actual API calls will validate permissions
+                    return true;
+                }
+                return false;
+            } catch (error) {
+                console.error('Permission test failed:', error);
+                return false;
+            }
+        }
+
         // Check if current user can edit workspace (Admin or Member role required)
         function canEditWorkspace() {
-            if (!currentUserRole) return false;
-            return currentUserRole === 'Admin' || currentUserRole === 'Member';
+            // If user has direct permissions, check them
+            if (currentUserRole) {
+                return currentUserRole === 'Admin' || currentUserRole === 'Member';
+            }
+
+            // If no direct permissions but groups exist with Admin/Member role,
+            // assume user might have permissions through group membership
+            // The actual API calls will validate permissions on the backend
+            if (allUsers) {
+                const adminOrMemberGroups = allUsers.filter(u =>
+                    u.principalType === 'Group' &&
+                    (u.groupUserAccessRight === 'Admin' || u.groupUserAccessRight === 'Member')
+                );
+
+                // If such groups exist, allow UI actions (backend will validate)
+                if (adminOrMemberGroups.length > 0) {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         // Check if current user can edit a specific workspace by ID
@@ -958,17 +1033,31 @@
             const users = workspaceUserMap.get(workspaceId);
             if (!users) return false;
 
-            // Find current user in workspace users
+            // Find current user in workspace users (direct assignment)
             const currentUser = users.find(user =>
                 user.emailAddress?.toLowerCase() === currentUserEmail.toLowerCase() ||
                 user.identifier?.toLowerCase() === currentUserEmail.toLowerCase()
             );
 
-            if (!currentUser) return false;
+            if (currentUser) {
+                // Check if user has Admin or Member role
+                const role = currentUser.groupUserAccessRight;
+                return role === 'Admin' || role === 'Member';
+            }
 
-            // Check if user has Admin or Member role
-            const role = currentUser.groupUserAccessRight;
-            return role === 'Admin' || role === 'Member';
+            // Check if there are groups with Admin/Member permissions
+            // User might have permissions through group membership
+            const adminOrMemberGroups = users.filter(u =>
+                u.principalType === 'Group' &&
+                (u.groupUserAccessRight === 'Admin' || u.groupUserAccessRight === 'Member')
+            );
+
+            // If such groups exist, allow UI actions (backend API will validate actual permissions)
+            if (adminOrMemberGroups.length > 0) {
+                return true;
+            }
+
+            return false;
         }
 
         // Update UI elements based on user permissions
