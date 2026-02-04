@@ -607,6 +607,7 @@
         let knownUsers = new Map(); // Cache of users seen across workspaces
         let workspaceUserMap = new Map(); // workspaceId -> users array (full cache)
         let userCacheBuilt = false; // Flag to track if full cache is ready
+        let cacheBuildingPaused = false; // Pause cache building during write operations
 
 
         // Sign out
@@ -729,7 +730,7 @@
 
         // Build complete user cache using parallel requests
         async function buildUserCache() {
-            if (userCacheBuilt || allWorkspacesCache.length === 0) return;
+            if (userCacheBuilt || allWorkspacesCache.length === 0 || cacheBuildingPaused) return;
 
             const BATCH_SIZE = 10; // Process 10 workspaces in parallel
             const total = allWorkspacesCache.length;
@@ -738,6 +739,11 @@
             showAlert(`Building user cache... 0/${total}`, 'info');
 
             for (let i = 0; i < total; i += BATCH_SIZE) {
+                // Check if paused during loop
+                if (cacheBuildingPaused) {
+                    showAlert('Cache building paused for data update', 'info');
+                    return;
+                }
                 const batch = allWorkspacesCache.slice(i, i + BATCH_SIZE);
 
                 // Run batch in parallel
@@ -1024,11 +1030,13 @@
             
             selectedUsers.clear();
             updateWorkspaceBulkActions();
-            // Invalidate cache for this workspace
+            // Pause cache building during update
+            cacheBuildingPaused = true;
             workspaceUserMap.delete(currentWorkspaceId);
             showAlert(`Removed ${successCount} user(s)`, 'success');
             await loadWorkspaceUsers();
             rebuildKnownUsersCache();
+            cacheBuildingPaused = false;
         }
 
         function stageRoleChange(identifier, newRole) {
@@ -1103,10 +1111,12 @@
             
             pendingRoleChanges.clear();
             updatePendingChangesUI();
-            // Invalidate cache for this workspace
+            // Pause cache building during update
+            cacheBuildingPaused = true;
             workspaceUserMap.delete(currentWorkspaceId);
             showAlert(`Applied ${successCount} change(s)`, 'success');
             await loadWorkspaceUsers();
+            cacheBuildingPaused = false;
         }
 
         function cancelPendingRoleChanges() {
@@ -1207,17 +1217,20 @@
                 if (response.ok) {
                     showAlert('User added', 'success');
                     closeAddUserModal();
-                    // Invalidate cache for this workspace
+                    // Pause cache building during update
+                    cacheBuildingPaused = true;
                     workspaceUserMap.delete(currentWorkspaceId);
                     await loadWorkspaceUsers();
+                    cacheBuildingPaused = false;
                 } else {
                     throw new Error('Failed to add user');
                 }
             } catch (error) {
                 showAlert('Error: ' + error.message, 'error');
+                cacheBuildingPaused = false;
             }
         }
-        
+
         async function removeUser(identifier) {
             const user = allUsers.find(u => u.identifier === identifier);
             if (!confirm(`Remove ${user.displayName || user.emailAddress}?`)) return;
@@ -1230,13 +1243,16 @@
 
                 if (response.ok) {
                     showAlert('User removed', 'success');
-                    // Invalidate cache for this workspace
+                    // Pause cache building during update
+                    cacheBuildingPaused = true;
                     workspaceUserMap.delete(currentWorkspaceId);
                     await loadWorkspaceUsers();
                     rebuildKnownUsersCache();
+                    cacheBuildingPaused = false;
                 }
             } catch (error) {
                 showAlert('Error: ' + error.message, 'error');
+                cacheBuildingPaused = false;
             }
         }
 
@@ -1615,12 +1631,15 @@
                 
                 if (response.ok) {
                     showAlert('Removed from workspace', 'success');
-                    // Invalidate cache for this workspace
+                    // Pause cache building during update
+                    cacheBuildingPaused = true;
                     workspaceUserMap.delete(workspaceId);
                     await loadUserWorkspaces();
                     rebuildKnownUsersCache();
+                    cacheBuildingPaused = false;
                 }
             } catch (error) {
+                cacheBuildingPaused = false;
                 showAlert('Error: ' + error.message, 'error');
             }
         }
@@ -1720,9 +1739,12 @@
                 }
             }
 
+            // Pause cache building during update
+            cacheBuildingPaused = true;
             showAlert(`Added to ${successCount} workspace(s)`, 'success');
             closeAddWorkspaceAccessModal();
             await loadUserWorkspaces();
+            cacheBuildingPaused = false;
         }
 
         async function bulkChangeUserRole(newRole) {
@@ -1765,9 +1787,12 @@
                 }
             }
 
+            // Pause cache building during update
+            cacheBuildingPaused = true;
             showAlert(`Changed ${successCount} roles`, 'success');
             selectedWorkspacesForUser.clear();
             await loadUserWorkspaces();
+            cacheBuildingPaused = false;
         }
 
         async function bulkRemoveUserFromWorkspaces() {
@@ -1797,12 +1822,15 @@
                 }
             }
 
+            // Pause cache building during update
+            cacheBuildingPaused = true;
             showAlert(`Removed from ${successCount} workspace(s)`, 'success');
             selectedWorkspacesForUser.clear();
             await loadUserWorkspaces();
             rebuildKnownUsersCache();
+            cacheBuildingPaused = false;
         }
-        
+
         function clearUserSelection() {
             selectedViewUser = null;
             userWorkspaces = [];
@@ -1815,14 +1843,20 @@
         // UTILITY FUNCTIONS
         async function apiCall(url, options = {}) {
             if (!accessToken) throw new Error('Not authenticated');
-            
+
+            // Check token expiry
+            if (tokenExpiry && Date.now() > tokenExpiry) {
+                signOut();
+                throw new Error('Session expired. Please sign in again.');
+            }
+
             const defaultOptions = {
                 headers: {
                     'Authorization': `Bearer ${accessToken}`,
                     'Content-Type': 'application/json'
                 }
             };
-            
+
             return fetch(url, { ...defaultOptions, ...options });
         }
         
