@@ -20,7 +20,8 @@
             background: white;
             border-radius: 12px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            overflow: hidden;
+            overflow: visible;
+            min-height: calc(100vh - 40px);
         }
         
         .header {
@@ -205,17 +206,16 @@
         
         .user-search-dropdown {
             position: absolute;
-            top: 100%;
+            top: calc(100% + 2px);
             left: 0;
             right: 0;
             background: white;
             border: 2px solid #667eea;
-            border-top: none;
-            border-radius: 0 0 6px 6px;
-            max-height: 400px;
+            border-radius: 6px;
+            max-height: 500px;
             overflow-y: auto;
-            z-index: 1000;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 9999;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.25);
         }
         
         .user-search-item {
@@ -399,7 +399,7 @@
                 <p style="color: #666; margin-bottom: 20px;">
                     Enter a user's email or group name to see and manage all their workspace access
                 </p>
-                <div style="max-width: 600px;">
+                <div style="max-width: 900px;">
                     <div style="display: flex; gap: 10px; position: relative;">
                         <div style="flex: 1; position: relative;">
                             <input type="text" id="userViewEmailInput"
@@ -409,7 +409,7 @@
                                    onkeypress="if(event.key === 'Enter') { hideUserSuggestions(); searchUserByEmail(); }"
                                    onfocus="showUserSuggestions()"
                                    autocomplete="off">
-                            <div id="userSuggestions" class="user-search-dropdown" style="display: none;"></div>
+                            <div id="userSuggestions" class="user-search-dropdown" style="display: none; min-width: 500px;"></div>
                         </div>
                         <button onclick="searchUserByEmail()" class="button-success">Search</button>
                     </div>
@@ -1949,7 +1949,7 @@
                     (user.displayName && user.displayName.toLowerCase().includes(searchTerm)) ||
                     (user.email && user.email.toLowerCase().includes(searchTerm))
                 )
-                .slice(0, 15);
+                .slice(0, 25);
 
             if (matches.length === 0) {
                 dropdown.style.display = 'none';
