@@ -510,11 +510,21 @@
     <!-- Add User Modal -->
     <div class="modal" id="addUserModal">
         <div class="modal-content">
-            <div class="modal-header"><h2>➕ Add User</h2></div>
+            <div class="modal-header"><h2>➕ Add User/Group</h2></div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label>Email or Object ID</label>
-                    <input type="text" id="newUserEmail" placeholder="user@company.com or Object ID">
+                    <label>Search User or Group</label>
+                    <div style="position: relative;">
+                        <input type="text" id="newUserEmail"
+                               placeholder="Start typing user email or group name..."
+                               oninput="showAddUserSuggestions()"
+                               onfocus="showAddUserSuggestions()"
+                               autocomplete="off">
+                        <div class="user-search-dropdown" id="addUserSuggestions" style="display: none;"></div>
+                    </div>
+                    <p style="font-size: 11px; color: #666; margin-top: 5px;">
+                        💡 Type to search from cached users/groups, or enter email/Object ID directly
+                    </p>
                 </div>
                 <div class="form-group">
                     <label>Role</label>
@@ -1110,11 +1120,66 @@
         function showAddUserModal() {
             document.getElementById('addUserModal').classList.add('active');
         }
-        
+
         function closeAddUserModal() {
             document.getElementById('addUserModal').classList.remove('active');
+            document.getElementById('newUserEmail').value = '';
+            document.getElementById('newUserType').value = 'User';
+            document.getElementById('addUserSuggestions').style.display = 'none';
         }
-        
+
+        function showAddUserSuggestions() {
+            const input = document.getElementById('newUserEmail');
+            const dropdown = document.getElementById('addUserSuggestions');
+            const searchTerm = input.value.trim().toLowerCase();
+
+            if (searchTerm.length === 0 || knownUsers.size === 0) {
+                dropdown.style.display = 'none';
+                return;
+            }
+
+            const matches = Array.from(knownUsers.values())
+                .filter(user =>
+                    (user.displayName && user.displayName.toLowerCase().includes(searchTerm)) ||
+                    (user.email && user.email.toLowerCase().includes(searchTerm))
+                )
+                .slice(0, 10);
+
+            if (matches.length === 0) {
+                dropdown.style.display = 'none';
+                return;
+            }
+
+            dropdown.innerHTML = matches.map(user => {
+                const isGroup = user.principalType === 'Group';
+                const avatarStyle = isGroup
+                    ? 'background: linear-gradient(135deg, #28a745 0%, #20c997 100%);'
+                    : '';
+                const avatarContent = isGroup ? '👥' : getInitials(user.displayName);
+                const typeLabel = isGroup
+                    ? '<span style="background: #d4edda; color: #155724; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 8px;">Group</span>'
+                    : '';
+
+                return `
+                    <div class="user-search-item" onclick="selectAddUserSuggestion('${escapeHtml(user.email || user.identifier)}', '${user.principalType || 'User'}')">
+                        <div class="user-avatar" style="${avatarStyle}">${avatarContent}</div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600;">${escapeHtml(user.displayName)}${typeLabel}</div>
+                            <div style="font-size: 11px; color: #666;">${escapeHtml(user.email || user.identifier)}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            dropdown.style.display = 'block';
+        }
+
+        function selectAddUserSuggestion(identifier, principalType) {
+            document.getElementById('newUserEmail').value = identifier;
+            document.getElementById('newUserType').value = principalType;
+            document.getElementById('addUserSuggestions').style.display = 'none';
+        }
+
         async function addUser() {
             const email = document.getElementById('newUserEmail').value.trim();
             const role = document.getElementById('newUserRole').value;
@@ -1927,6 +1992,9 @@
             }
             if (!e.target.closest('#userViewEmailInput') && !e.target.closest('#userSuggestions')) {
                 document.getElementById('userSuggestions').style.display = 'none';
+            }
+            if (!e.target.closest('#newUserEmail') && !e.target.closest('#addUserSuggestions')) {
+                document.getElementById('addUserSuggestions').style.display = 'none';
             }
         });
 
