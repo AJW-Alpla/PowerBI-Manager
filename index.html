@@ -486,7 +486,7 @@
                 </div>
                 <div style="background: #1e1e1e; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
                     <code id="psCommand" style="display: block; color: #9cdcfe; font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; white-space: pre-wrap; line-height: 1.6; cursor: pointer;"
-                          onclick="copyPowerShellCommand()" title="Click to copy">Connect-PowerBIServiceAccount; (Get-PowerBIAccessToken).Authorization.Replace("Bearer ","") | Set-Clipboard; Write-Host "Token copied!" -ForegroundColor Green</code>
+                          onclick="copyPowerShellCommand()" title="Click to copy">if (-not (Get-Module -ListAvailable -Name MicrosoftPowerBIMgmt)) { Write-Host "PowerBI module not found. Installing..." -ForegroundColor Yellow; Install-Module -Name MicrosoftPowerBIMgmt -Scope CurrentUser -Force }; Connect-PowerBIServiceAccount; (Get-PowerBIAccessToken).Authorization.Replace("Bearer ","") | Set-Clipboard; Write-Host "Token copied!" -ForegroundColor Green</code>
                     <button onclick="copyPowerShellCommand()" style="margin-top: 10px; font-size: 11px; padding: 5px 10px;">📋 Copy Command</button>
                 </div>
                 <div style="padding: 15px; background: #e8f5e9; border-radius: 6px; margin-bottom: 20px; border: 1px solid #4caf50;">
@@ -651,7 +651,7 @@
         }
 
         function copyPowerShellCommand() {
-            const cmd = 'Connect-PowerBIServiceAccount; (Get-PowerBIAccessToken).Authorization.Replace("Bearer ","") | Set-Clipboard; Write-Host "Token copied!" -ForegroundColor Green';
+            const cmd = 'if (-not (Get-Module -ListAvailable -Name MicrosoftPowerBIMgmt)) { Write-Host "PowerBI module not found. Installing..." -ForegroundColor Yellow; Install-Module -Name MicrosoftPowerBIMgmt -Scope CurrentUser -Force }; Connect-PowerBIServiceAccount; (Get-PowerBIAccessToken).Authorization.Replace("Bearer ","") | Set-Clipboard; Write-Host "Token copied!" -ForegroundColor Green';
             navigator.clipboard.writeText(cmd).then(() => {
                 showAlert('PowerShell command copied! Paste in PowerShell and run.', 'success');
             }).catch(() => {
