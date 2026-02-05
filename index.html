@@ -365,8 +365,16 @@
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
                             <strong>Selected Workspace:</strong> <span id="selectedWorkspaceName"></span>
+                            <span style="margin-left: 15px; color: #666; font-size: 14px;">
+                                👥 <span id="workspaceUserCount">0</span> user(s)
+                            </span>
                         </div>
-                        <button onclick="clearWorkspaceSelection()" class="button-secondary">Change Workspace</button>
+                        <div style="display: flex; gap: 10px;">
+                            <button onclick="refreshCurrentWorkspace()" class="button-primary" title="Refresh workspace users (F5)">
+                                🔄 Refresh
+                            </button>
+                            <button onclick="clearWorkspaceSelection()" class="button-secondary">Change Workspace</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -477,7 +485,12 @@
                                 <span id="selectedUserPanelEmail"></span> • <strong id="workspaceCount">0</strong> workspaces
                             </div>
                         </div>
-                        <button onclick="clearUserSelection()" class="button-secondary">Change User</button>
+                        <div style="display: flex; gap: 10px;">
+                            <button onclick="refreshCurrentUser()" class="button-primary" title="Refresh user workspaces (F5)">
+                                🔄 Refresh
+                            </button>
+                            <button onclick="clearUserSelection()" class="button-secondary">Change User</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -579,7 +592,14 @@
                     <div id="adminWorkspaceSuggestions" class="user-search-dropdown" style="display: none;"></div>
                 </div>
                 <div id="adminSelectedWorkspaceInfo" style="display: none; margin-top: 15px; padding: 15px; background: #d4edda; border-radius: 6px; border: 2px solid #28a745;">
-                    <strong style="color: #155724;">✓ Selected Workspace:</strong> <span id="adminSelectedWorkspaceName" style="color: #155724; font-weight: 600;"></span>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <strong style="color: #155724;">✓ Selected Workspace:</strong> <span id="adminSelectedWorkspaceName" style="color: #155724; font-weight: 600;"></span>
+                        </div>
+                        <button onclick="refreshCurrentAdminWorkspace()" class="button-success" title="Refresh workspace users (F5)" style="padding: 8px 16px; font-size: 13px;">
+                            🔄 Refresh
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -1450,6 +1470,42 @@
             document.getElementById('adminWorkspaceSearch').value = '';
         }
 
+        async function refreshCurrentAdminWorkspace() {
+            if (!adminSelectedWorkspaceId) {
+                showAlert('No workspace selected', 'warning');
+                return;
+            }
+
+            // Clear cache for current workspace to force fresh data
+            workspaceUserMap.delete(adminSelectedWorkspaceId);
+            workspaceCacheTTL.delete(adminSelectedWorkspaceId);
+            dirtyWorkspaces.delete(adminSelectedWorkspaceId);
+
+            // Reload workspace users
+            showAlert('🔄 Refreshing workspace...', 'info');
+
+            try {
+                const response = await apiCall(`https://api.powerbi.com/v1.0/myorg/admin/groups/${adminSelectedWorkspaceId}/users`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const users = data.value || [];
+                    setCacheWithTTL(adminSelectedWorkspaceId, users);
+
+                    // Update known users
+                    users.forEach(user => {
+                        knownUsers.set(user.identifier, user);
+                    });
+
+                    showAlert(`✓ Workspace refreshed - ${users.length} user(s)`, 'success');
+                } else {
+                    showAlert('Failed to refresh workspace', 'error');
+                }
+            } catch (error) {
+                showAlert('Failed to refresh workspace', 'error');
+                console.error('Admin refresh error:', error);
+            }
+        }
+
         // Track selected users for bulk add modal
         let adminBulkSelectedUsers = [];
 
@@ -2077,6 +2133,29 @@
             document.getElementById('userTableBody').innerHTML = '<tr><td colspan="6" class="empty-state"><div style="padding: 40px;"><div style="font-size: 48px; margin-bottom: 15px;">📁</div><p>Enter a workspace name above to view and manage users</p></div></td></tr>';
             document.getElementById('pendingChangesContainer').style.display = 'none';
         }
+
+        async function refreshCurrentWorkspace() {
+            if (!currentWorkspaceId) {
+                showAlert('No workspace selected', 'warning');
+                return;
+            }
+
+            // Clear cache for current workspace to force fresh data
+            workspaceUserMap.delete(currentWorkspaceId);
+            workspaceCacheTTL.delete(currentWorkspaceId);
+            dirtyWorkspaces.delete(currentWorkspaceId);
+
+            // Clear pending changes
+            selectedUsers.clear();
+            pendingRoleChanges.clear();
+            updatePendingChangesUI();
+            updateWorkspaceBulkActions();
+
+            // Reload users
+            showAlert('🔄 Refreshing workspace...', 'info');
+            await loadWorkspaceUsers();
+            showAlert('✓ Workspace refreshed', 'success');
+        }
         
         async function loadWorkspaceUsers() {
             const tbody = document.getElementById('userTableBody');
@@ -2281,12 +2360,21 @@
             }
         }
 
+        // Update workspace info display (user count, etc.)
+        function updateWorkspaceInfo() {
+            const userCountElement = document.getElementById('workspaceUserCount');
+            if (userCountElement) {
+                userCountElement.textContent = allUsers.length;
+            }
+        }
+
         function renderUsers() {
             const tbody = document.getElementById('userTableBody');
             tbody.innerHTML = '';
 
             if (allUsers.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No users found</td></tr>';
+                updateWorkspaceInfo(); // Update count even when empty
                 return;
             }
 
@@ -2350,6 +2438,9 @@
             });
 
             tbody.appendChild(fragment);
+
+            // Update workspace info with current user count
+            updateWorkspaceInfo();
         }
         
         function toggleUserSelection(identifier) {
@@ -2574,12 +2665,18 @@
 
             if (!confirm(`Apply ${pendingRoleChanges.size} role change(s)?`)) return;
 
-            // Build payloads using O(1) Map lookup
+            // Build payloads and save original state for potential rollback
             const payloads = [];
             const identifiersToRoles = [];
+            const originalRoles = new Map(); // For rollback
+
             for (const [identifier, newRole] of pendingRoleChanges.entries()) {
                 const user = allUsersById.get(identifier);
                 if (!user) continue;
+
+                // Save original role for rollback
+                originalRoles.set(identifier, user.groupUserAccessRight);
+
                 payloads.push({
                     groupUserAccessRight: newRole,
                     principalType: user.principalType || 'User',
@@ -2589,9 +2686,24 @@
                 identifiersToRoles.push({ identifier, newRole });
             }
 
-            // Process in parallel batches
+            // ⚡ TRULY OPTIMISTIC: Apply changes IMMEDIATELY (before API calls)
+            for (const { identifier, newRole } of identifiersToRoles) {
+                updateUserInCache(currentWorkspaceId, identifier, {
+                    groupUserAccessRight: newRole
+                });
+            }
+
+            pendingRoleChanges.clear();
+            updatePendingChangesUI();
+            buildUserIndex();
+            renderUsers();
+
+            showAlert('Applying role changes...', 'info');
+
+            // 🌐 THEN verify with API in background
             let successCount = 0;
             let failureCount = 0;
+            const failedIdentifiers = [];
 
             for (let i = 0; i < payloads.length; i += BATCH_SIZE) {
                 const batch = payloads.slice(i, i + BATCH_SIZE);
@@ -2609,13 +2721,9 @@
                 results.forEach((result, idx) => {
                     if (result.status === 'fulfilled' && result.value.ok) {
                         successCount++;
-                        // Update cache in-memory
-                        const { identifier, newRole } = batchIdentifiers[idx];
-                        updateUserInCache(currentWorkspaceId, identifier, {
-                            groupUserAccessRight: newRole
-                        });
                     } else {
                         failureCount++;
+                        failedIdentifiers.push(batchIdentifiers[idx].identifier);
                     }
                 });
 
@@ -2624,21 +2732,28 @@
                 }
             }
 
-            pendingRoleChanges.clear();
-            updatePendingChangesUI();
+            // ❌ Rollback failed changes
+            if (failureCount > 0) {
+                for (const identifier of failedIdentifiers) {
+                    const originalRole = originalRoles.get(identifier);
+                    if (originalRole) {
+                        updateUserInCache(currentWorkspaceId, identifier, {
+                            groupUserAccessRight: originalRole
+                        });
+                    }
+                }
+                buildUserIndex();
+                renderUsers();
+            }
 
             // Show comprehensive feedback
             if (failureCount === 0) {
                 showAlert(`✓ Successfully applied ${successCount} change(s)`, 'success');
             } else if (successCount === 0) {
-                showAlert(`✗ Failed to apply changes`, 'error');
+                showAlert(`✗ Failed to apply changes - rolled back`, 'error');
             } else {
-                showAlert(`⚠ Partially completed: ${successCount} applied, ${failureCount} failed`, 'error');
+                showAlert(`⚠ ${successCount} applied, ${failureCount} failed and rolled back`, 'error');
             }
-
-            // Re-render with updated cache (no API call needed!)
-            buildUserIndex();
-            renderUsers();
 
             // OPTIMIZATION 4 & 6: Update TTL and mark for verification
             if (successCount > 0) {
@@ -2752,6 +2867,26 @@
             }
 
             operationInProgress = true;
+
+            // ⚡ TRULY OPTIMISTIC: Update UI IMMEDIATELY (before API call)
+            const newUser = {
+                identifier: email,
+                email: email,
+                emailAddress: email,
+                displayName: email,
+                principalType: type
+            };
+
+            optimisticAddUser(currentWorkspaceId, newUser, role);
+            allUsers = workspaceUserMap.get(currentWorkspaceId);
+            buildUserIndex();
+            updateCurrentUserRole();
+            renderUsers();
+
+            closeAddUserModal();
+            showAlert('Adding user...', 'info');
+
+            // 🌐 THEN verify with API in background
             try {
                 const payload = {
                     emailAddress: email,
@@ -2766,34 +2901,28 @@
                 );
 
                 if (response.ok) {
-                    showAlert('User added', 'success');
-                    closeAddUserModal();
+                    showAlert('✓ User added successfully', 'success');
 
-                    // OPTIMIZATION 1: Optimistic update - update cache immediately
-                    optimisticAddUser(currentWorkspaceId, {
-                        identifier: email,
-                        email: email,
-                        displayName: email,
-                        principalType: type
-                    }, role);
-
-                    // Update current view
+                    // Mark as dirty for background verification
+                    markWorkspaceDirty(currentWorkspaceId);
+                    requestDebouncedRefresh();
+                } else {
+                    // ❌ Rollback on failure
+                    optimisticRemoveUser(currentWorkspaceId, email);
                     allUsers = workspaceUserMap.get(currentWorkspaceId);
                     buildUserIndex();
                     updateCurrentUserRole();
                     renderUsers();
-
-                    // OPTIMIZATION 6: Mark as dirty for background verification
-                    markWorkspaceDirty(currentWorkspaceId);
-                    requestDebouncedRefresh();
-                } else {
-                    throw new Error('Failed to add user');
+                    showAlert('Failed to add user - changes reverted', 'error');
                 }
             } catch (error) {
-                showAlert('Failed to add user', 'error');
-                // On error, force refresh to get accurate state
-                workspaceUserMap.delete(currentWorkspaceId);
-                await loadWorkspaceUsers();
+                // ❌ Rollback on error
+                optimisticRemoveUser(currentWorkspaceId, email);
+                allUsers = workspaceUserMap.get(currentWorkspaceId);
+                buildUserIndex();
+                updateCurrentUserRole();
+                renderUsers();
+                showAlert('Failed to add user - changes reverted', 'error');
             } finally {
                 operationInProgress = false;
             }
@@ -2816,6 +2945,18 @@
             if (!user || !confirm(`Remove ${user.displayName || user.emailAddress}?`)) return;
 
             operationInProgress = true;
+
+            // ⚡ TRULY OPTIMISTIC: Remove from UI IMMEDIATELY (before API call)
+            const removedUser = { ...user }; // Keep copy for potential rollback
+            optimisticRemoveUser(currentWorkspaceId, identifier);
+            allUsers = workspaceUserMap.get(currentWorkspaceId);
+            buildUserIndex();
+            updateCurrentUserRole();
+            renderUsers();
+
+            showAlert('Removing user...', 'info');
+
+            // 🌐 THEN verify with API in background
             try {
                 const response = await apiCall(
                     `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users/${encodeURIComponent(identifier)}`,
@@ -2823,26 +2964,28 @@
                 );
 
                 if (response.ok) {
-                    showAlert('User removed', 'success');
+                    showAlert('✓ User removed successfully', 'success');
 
-                    // OPTIMIZATION 1: Optimistic update - remove from cache immediately
-                    optimisticRemoveUser(currentWorkspaceId, identifier);
-
-                    // Update current view
+                    // Mark as dirty for background verification
+                    markWorkspaceDirty(currentWorkspaceId);
+                    requestDebouncedRefresh();
+                } else {
+                    // ❌ Rollback on failure - restore the user
+                    optimisticAddUser(currentWorkspaceId, removedUser, removedUser.groupUserAccessRight);
                     allUsers = workspaceUserMap.get(currentWorkspaceId);
                     buildUserIndex();
                     updateCurrentUserRole();
                     renderUsers();
-
-                    // OPTIMIZATION 6: Mark as dirty for background verification
-                    markWorkspaceDirty(currentWorkspaceId);
-                    requestDebouncedRefresh();
+                    showAlert('Failed to remove user - changes reverted', 'error');
                 }
             } catch (error) {
-                showAlert('Failed to remove user', 'error');
-                // On error, force refresh to get accurate state
-                workspaceUserMap.delete(currentWorkspaceId);
-                await loadWorkspaceUsers();
+                // ❌ Rollback on error - restore the user
+                optimisticAddUser(currentWorkspaceId, removedUser, removedUser.groupUserAccessRight);
+                allUsers = workspaceUserMap.get(currentWorkspaceId);
+                buildUserIndex();
+                updateCurrentUserRole();
+                renderUsers();
+                showAlert('Failed to remove user - changes reverted', 'error');
             } finally {
                 operationInProgress = false;
             }
@@ -3568,6 +3711,22 @@
             document.getElementById('selectedUserPanel').style.display = 'none';
             document.getElementById('userWorkspacesContainer').style.display = 'none';
         }
+
+        async function refreshCurrentUser() {
+            if (!selectedViewUser) {
+                showAlert('No user selected', 'warning');
+                return;
+            }
+
+            // Clear cached data for fresh reload
+            userWorkspaces = [];
+            selectedWorkspacesForUser.clear();
+
+            // Reload user workspaces
+            showAlert('🔄 Refreshing user workspaces...', 'info');
+            await loadUserWorkspaces();
+            showAlert('✓ User workspaces refreshed', 'success');
+        }
         
         // UTILITY FUNCTIONS
         async function apiCall(url, options = {}) {
@@ -3863,6 +4022,25 @@
             if (!e.target.closest('#adminUserSearch') && !e.target.closest('#adminUserSuggestions')) {
                 const adminUserDropdown = document.getElementById('adminUserSuggestions');
                 if (adminUserDropdown) adminUserDropdown.style.display = 'none';
+            }
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // F5 - Refresh current view
+            if (e.key === 'F5') {
+                e.preventDefault(); // Prevent browser refresh
+
+                // Determine which view is active and refresh accordingly
+                if (currentView === 'workspace' && currentWorkspaceId) {
+                    refreshCurrentWorkspace();
+                } else if (currentView === 'user' && selectedViewUser) {
+                    refreshCurrentUser();
+                } else if (currentView === 'admin' && adminSelectedWorkspaceId) {
+                    refreshCurrentAdminWorkspace();
+                } else {
+                    showAlert('No workspace or user selected to refresh', 'info');
+                }
             }
         });
 
