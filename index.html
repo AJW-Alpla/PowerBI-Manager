@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Power BI Rights Manager</title>
+    <title>ALPLA - Power BI Rights Manager</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #e5e5e5;
             min-height: 100vh;
             padding: 20px;
         }
@@ -20,18 +20,32 @@
             background: white;
             border-radius: 12px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            border: 3px solid #999999;
             overflow: visible;
             min-height: calc(100vh - 40px);
         }
         
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            background: white;
+            color: #004d90;
             padding: 30px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            border-bottom: 3px solid #004d90;
         }
-        
-        .header h1 { font-size: 28px; margin-bottom: 10px; }
-        .header p { opacity: 0.9; font-size: 14px; }
+
+        .header-logo {
+            height: 50px;
+            width: auto;
+        }
+
+        .header-content {
+            flex: 1;
+        }
+
+        .header h1 { font-size: 28px; margin-bottom: 10px; color: #004d90; }
+        .header p { opacity: 0.8; font-size: 14px; color: #333333; }
         
         .auth-section {
             padding: 30px;
@@ -60,7 +74,7 @@
             cursor: pointer;
             font-weight: 600;
             font-size: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #004d90;
             color: white;
             transition: all 0.3s;
         }
@@ -74,13 +88,13 @@
         
         .view-toggle {
             padding: 10px 20px;
-            border: 2px solid #667eea;
+            border: 2px solid #999999;
             background: white;
-            color: #667eea;
+            color: #333333;
         }
-        
+
         .view-toggle.active {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #004d90;
             color: white;
             border-color: transparent;
         }
@@ -91,15 +105,15 @@
         input[type="text"], textarea, select {
             width: 100%;
             padding: 12px;
-            border: 2px solid #e0e0e0;
+            border: 2px solid #cccccc;
             border-radius: 6px;
             font-size: 14px;
             font-family: inherit;
         }
-        
+
         input:focus, textarea:focus, select:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #999999;
         }
         
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
@@ -113,7 +127,7 @@
             width: 40px;
             height: 40px;
             border-radius: 50%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #004d90;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -121,12 +135,12 @@
             font-weight: 600;
             font-size: 14px;
         }
-        
+
         .user-avatar-large {
             width: 80px;
             height: 80px;
             border-radius: 50%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #004d90;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -171,10 +185,11 @@
             max-height: 90vh;
             overflow-y: auto;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            border: 3px solid #999999;
         }
         
         .modal-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #004d90;
             color: white;
             padding: 20px 30px;
             border-radius: 12px 12px 0 0;
@@ -210,7 +225,7 @@
             left: 0;
             right: 0;
             background: white;
-            border: 2px solid #667eea;
+            border: 2px solid #999999;
             border-radius: 6px;
             max-height: 500px;
             overflow-y: auto;
@@ -253,7 +268,7 @@
         
         .loading-spinner {
             border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
+            border-top: 3px solid #004d90;
             border-radius: 50%;
             width: 40px;
             height: 40px;
@@ -276,8 +291,13 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>⚡ Power BI Rights Manager</h1>
-            <p>Manage workspace permissions and user access</p>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160.43 30" class="header-logo">
+                <path d="M133.91,17.52l4.46-7.65h0l4.46,7.65ZM84.58,12.75H80V7.86h4.54c2.51,0,4.54,1.1,4.54,2.45s-2,2.45-4.54,2.45m-67,4.77,4.46-7.65h0l4.46,7.65Zm142.46,8.16h0L144,2.1h0C143.09.84,140.86,0,138.37,0s-4.72.84-5.59,2.1h0L119.31,21.82h-8.12V3.21c0-1.77-2.66-3.21-6-3.21s-6,1.44-6,3.21v2.4C96.55,2.28,91,0,84.58,0H74.09c-3.29,0-6,1.44-6,3.21V23.8a7.39,7.39,0,0,0-5.36-2h-8.2V3.21c0-1.77-2.67-3.21-6-3.21s-6,1.44-6,3.21V24.1l-15-22h0C26.78.84,24.55,0,22.06,0s-4.73.84-5.59,2.1h0L.37,25.68h0A2,2,0,0,0,0,26.79C0,28.56,2.67,30,6,30c2.6,0,4.9-.91,5.68-2.25l1.82-3.11H30.67l1.82,3.11c.78,1.34,3.08,2.25,5.68,2.25a7.71,7.71,0,0,0,5.23-1.68A7.7,7.7,0,0,0,48.63,30H62.78a7.09,7.09,0,0,0,5.61-2.28c.74,1.32,3,2.28,5.7,2.28,3.29,0,6-1.44,6-3.21V20.61h4.54c6.41,0,12-2.28,14.71-5.61V26.79c0,1.77,2.67,3.21,6,3.21h17c2.6,0,4.9-.91,5.68-2.25l1.82-3.11H147l1.82,3.11c.78,1.34,3.08,2.25,5.68,2.25,3.29,0,6-1.44,6-3.21a2,2,0,0,0-.37-1.11" fill="#004d90"/>
+            </svg>
+            <div class="header-content">
+                <h1>Power BI Rights Manager</h1>
+                <p>Manage workspace permissions and user access</p>
+            </div>
         </div>
         
         <div class="auth-section">
@@ -2604,7 +2624,7 @@
 
                 dropdown.innerHTML = matches.map(ws => `
                     <div class="user-search-item" onclick="selectWorkspaceSuggestion('${ws.id}')">
-                        <div style="width: 32px; height: 32px; border-radius: 6px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">📁</div>
+                        <div style="width: 32px; height: 32px; border-radius: 6px; background: #004d90; display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">📁</div>
                         <div style="flex: 1;">
                             <div style="font-weight: 600;">${escapeHtml(ws.name)}</div>
                             <div style="font-size: 11px; color: #666;">${ws.type || 'Workspace'}</div>
