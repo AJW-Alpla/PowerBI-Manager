@@ -22,7 +22,6 @@
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             border: 3px solid #999999;
             overflow: visible;
-            min-height: calc(100vh - 40px);
         }
         
         .header {
@@ -85,7 +84,21 @@
         .button-secondary { background: #6c757d; }
         .button-success { background: #28a745; }
         .button-danger { background: #dc3545; }
-        
+
+        .admin-badge {
+            background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);
+            color: #000;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            margin-left: 10px;
+        }
+
+        .admin-warning-border {
+            border-left: 4px solid #ffc107 !important;
+        }
+
         .view-toggle {
             padding: 10px 20px;
             border: 2px solid #999999;
@@ -317,6 +330,9 @@
                 <button id="userViewBtn" onclick="switchView('user')" class="view-toggle">
                     👤 User View
                 </button>
+                <button id="adminViewBtn" onclick="switchView('admin')" class="view-toggle" style="display: none;">
+                    🔧 Admin Panel
+                </button>
             </div>
         </div>
         
@@ -507,7 +523,120 @@
             </div>
         </div>
     </div>
-    
+
+    <!-- ADMIN VIEW (Power BI Administrators Only) -->
+    <div id="adminView" style="display: none;">
+        <div style="padding: 30px; background: #fff3cd; border-bottom: 3px solid #ffc107;">
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <span style="font-size: 32px;">⚠️</span>
+                <div>
+                    <h2 style="color: #856404; margin-bottom: 5px;">🔧 Power BI Administrator Panel</h2>
+                    <p style="color: #856404; margin: 0;">
+                        You have elevated privileges. Changes affect the entire organization.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Mode Selector -->
+        <div style="padding: 30px; border-bottom: 1px solid #e0e0e0;">
+            <div style="display: flex; gap: 10px;">
+                <button id="adminModeWorkspaceBtn" onclick="switchAdminMode('workspace')" class="view-toggle active">
+                    📁 Assign Users to Workspace
+                </button>
+                <button id="adminModeUserBtn" onclick="switchAdminMode('user')" class="view-toggle">
+                    👤 Assign Workspaces to User
+                </button>
+            </div>
+        </div>
+
+        <!-- Help Section -->
+        <div style="padding: 15px 20px; background: #e7f3ff; margin: 20px 20px 0 20px; border-radius: 6px; border-left: 4px solid #004d90;">
+            <details style="cursor: pointer;">
+                <summary style="font-weight: 600; color: #004d90; margin-bottom: 5px;">ℹ️ About Admin Panel (click to expand)</summary>
+                <ul style="margin: 10px 0 0 20px; line-height: 1.6; color: #333; font-size: 13px;">
+                    <li><strong>Workspace Mode:</strong> Select a workspace and add multiple users/groups to it</li>
+                    <li><strong>User Mode:</strong> Select a user/group and add them to multiple workspaces</li>
+                    <li><strong>Scope:</strong> You can manage ANY workspace in the organization</li>
+                </ul>
+            </details>
+        </div>
+
+        <!-- Admin Mode: Assign Users to Workspace -->
+        <div id="adminAssignToWorkspace" style="background: white;">
+            <div style="padding: 30px; border-bottom: 2px solid #e0e0e0; background: #f8f9fa;">
+                <h3 style="color: #004d90; margin-bottom: 10px;">📁 Step 1: Select Workspace</h3>
+                <p style="color: #666; margin-bottom: 15px; font-size: 13px;">
+                    Search from all organizational workspaces (admin access)
+                </p>
+                <div style="position: relative;">
+                    <input type="text" id="adminWorkspaceSearch"
+                           placeholder="🔍 Type workspace name to search..."
+                           oninput="showAdminWorkspaceSuggestions()"
+                           onfocus="showAdminWorkspaceSuggestions()"
+                           autocomplete="off"
+                           style="width: 100%; max-width: 600px; padding: 14px 20px; border: 2px solid #004d90; border-radius: 8px; font-size: 15px; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div id="adminWorkspaceSuggestions" class="user-search-dropdown" style="display: none;"></div>
+                </div>
+                <div id="adminSelectedWorkspaceInfo" style="display: none; margin-top: 15px; padding: 15px; background: #d4edda; border-radius: 6px; border: 2px solid #28a745;">
+                    <strong style="color: #155724;">✓ Selected Workspace:</strong> <span id="adminSelectedWorkspaceName" style="color: #155724; font-weight: 600;"></span>
+                </div>
+            </div>
+
+            <div style="padding: 30px; background: white;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 style="color: #004d90;">👥 Step 2: Add Users/Groups</h3>
+                    <button onclick="showAdminBulkAddModal()" class="button-success" id="adminBulkAddBtn" style="display: none;">
+                        ➕ Add Multiple Users/Groups
+                    </button>
+                </div>
+                <div id="adminAssignUsersPlaceholder" class="empty-state" style="background: #f8f9fa; border: 2px dashed #ccc; border-radius: 8px;">
+                    <div style="padding: 50px; text-align: center;">
+                        <div style="font-size: 64px; margin-bottom: 15px; opacity: 0.3;">👥</div>
+                        <p style="color: #666; font-size: 15px;">Select a workspace above to assign users/groups</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Mode: Assign Workspaces to User -->
+        <div id="adminAssignToUser" style="display: none; background: white;">
+            <div style="padding: 30px; border-bottom: 2px solid #e0e0e0; background: #f8f9fa;">
+                <h3 style="color: #004d90; margin-bottom: 10px;">👤 Step 1: Select User or Group</h3>
+                <p style="color: #666; margin-bottom: 15px; font-size: 13px;">
+                    Enter user email or group name
+                </p>
+                <div style="position: relative;">
+                    <input type="text" id="adminUserSearch"
+                           placeholder="🔍 Type user email or group name to search..."
+                           oninput="showAdminUserSuggestions()"
+                           onfocus="showAdminUserSuggestions()"
+                           autocomplete="off"
+                           style="width: 100%; max-width: 600px; padding: 14px 20px; border: 2px solid #004d90; border-radius: 8px; font-size: 15px; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div id="adminUserSuggestions" class="user-search-dropdown" style="display: none;"></div>
+                </div>
+                <div id="adminSelectedUserInfo" style="display: none; margin-top: 15px; padding: 15px; background: #d4edda; border-radius: 6px; border: 2px solid #28a745;">
+                    <strong style="color: #155724;">✓ Selected:</strong> <span id="adminSelectedUserName" style="color: #155724; font-weight: 600;"></span>
+                </div>
+            </div>
+
+            <div style="padding: 30px; background: white;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 style="color: #004d90;">📁 Step 2: Add to Workspaces</h3>
+                    <button onclick="showAdminBulkWorkspaceModal()" class="button-success" id="adminBulkWorkspaceBtn" style="display: none;">
+                        ➕ Add to Multiple Workspaces
+                    </button>
+                </div>
+                <div id="adminAssignWorkspacesPlaceholder" class="empty-state" style="background: #f8f9fa; border: 2px dashed #ccc; border-radius: 8px;">
+                    <div style="padding: 50px; text-align: center;">
+                        <div style="font-size: 64px; margin-bottom: 15px; opacity: 0.3;">📁</div>
+                        <p style="color: #666; font-size: 15px;">Select a user/group above to assign workspaces</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Sign In Modal -->
     <div class="modal" id="authModal">
         <div class="modal-content">
@@ -650,6 +779,165 @@
         let userCacheBuilt = false; // Flag to track if full cache is ready
         let cacheBuildingPaused = false; // Pause cache building during write operations
 
+        // Admin panel state
+        let isPowerBIAdmin = false; // Power BI Administrator status
+        let adminWorkspaces = []; // All org workspaces (admin only)
+        let adminWorkspaceCache = new Map(); // O(1) lookup for admin workspaces
+
+        // Cache optimization state (all 6 proposals)
+        let workspaceCacheTTL = new Map(); // workspaceId -> expiry timestamp (Proposal 4: TTL)
+        let dirtyWorkspaces = new Set(); // Track workspaces needing refresh (Proposal 6: Change Events)
+        let refreshDebounceTimer = null; // Debounce refresh requests (Proposal 3: Batch Debouncing)
+        let backgroundSyncTimer = null; // Background sync interval (Proposal 5: Background Sync)
+        const CACHE_TTL = 300000; // 5 minutes cache TTL
+        const REFRESH_DEBOUNCE = 1000; // 1 second debounce for refresh batching
+        const BACKGROUND_SYNC_INTERVAL = 300000; // 5 minutes background sync
+
+        // SAFEGUARD 3: Concurrent operation lock
+        let operationInProgress = false;
+
+        // === OPTIMIZATION FUNCTIONS (6 Proposals) ===
+
+        // Proposal 4: Check if workspace cache is expired
+        function isCacheExpired(workspaceId) {
+            const expiry = workspaceCacheTTL.get(workspaceId);
+            return !expiry || expiry < Date.now();
+        }
+
+        // Proposal 4: Set cache with TTL
+        function setCacheWithTTL(workspaceId, users) {
+            workspaceUserMap.set(workspaceId, users);
+            workspaceCacheTTL.set(workspaceId, Date.now() + CACHE_TTL);
+        }
+
+        // Proposal 1: Optimistic update - Add user to cache
+        function optimisticAddUser(workspaceId, user, role) {
+            const users = workspaceUserMap.get(workspaceId) || [];
+            const newUser = {
+                identifier: user.identifier || user.email,
+                displayName: user.displayName || user.email,
+                emailAddress: user.email || user.identifier,
+                groupUserAccessRight: role,
+                principalType: user.principalType || 'User'
+            };
+            users.push(newUser);
+            setCacheWithTTL(workspaceId, users);
+
+            // Add to known users cache
+            knownUsers.set(newUser.identifier, newUser);
+        }
+
+        // Proposal 1: Optimistic update - Remove user from cache
+        function optimisticRemoveUser(workspaceId, userIdentifier) {
+            const users = workspaceUserMap.get(workspaceId) || [];
+            const filtered = users.filter(u => u.identifier !== userIdentifier);
+            setCacheWithTTL(workspaceId, filtered);
+        }
+
+        // Proposal 1: Optimistic update - Change user role in cache
+        function optimisticChangeRole(workspaceId, userIdentifier, newRole) {
+            const users = workspaceUserMap.get(workspaceId) || [];
+            const user = users.find(u => u.identifier === userIdentifier);
+            if (user) {
+                user.groupUserAccessRight = newRole;
+                setCacheWithTTL(workspaceId, users);
+            }
+        }
+
+        // Proposal 6: Mark workspace as needing refresh
+        function markWorkspaceDirty(workspaceId) {
+            dirtyWorkspaces.add(workspaceId);
+        }
+
+        // Proposal 2 & 6: Selective refresh - Only reload dirty workspaces
+        async function refreshDirtyWorkspaces() {
+            if (dirtyWorkspaces.size === 0) return;
+
+            const workspacesToRefresh = Array.from(dirtyWorkspaces);
+            dirtyWorkspaces.clear();
+
+            for (const wsId of workspacesToRefresh) {
+                try {
+                    await refreshSingleWorkspace(wsId);
+                } catch (error) {
+                    console.error(`Failed to refresh workspace ${wsId}:`, error);
+                }
+            }
+        }
+
+        // Proposal 2: Selective refresh - Reload single workspace
+        async function refreshSingleWorkspace(workspaceId) {
+            try {
+                const response = await apiCall(`https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const users = data.value || [];
+                    setCacheWithTTL(workspaceId, users);
+
+                    // Update known users
+                    users.forEach(user => {
+                        knownUsers.set(user.identifier, user);
+                    });
+
+                    // If this is the current workspace, re-render
+                    if (currentWorkspaceId === workspaceId) {
+                        allUsers = users;
+                        buildUserIndex();
+                        updateCurrentUserRole();
+                        renderUsers();
+                    }
+                }
+            } catch (error) {
+                console.error(`Error refreshing workspace ${workspaceId}:`, error);
+            }
+        }
+
+        // Proposal 3: Batch debounced refresh
+        function requestDebouncedRefresh() {
+            clearTimeout(refreshDebounceTimer);
+            refreshDebounceTimer = setTimeout(async () => {
+                await refreshDirtyWorkspaces();
+            }, REFRESH_DEBOUNCE);
+        }
+
+        // Proposal 5: Background sync - Check for external changes
+        async function backgroundSync() {
+            // SAFEGUARD 1: Don't sync if user has pending role changes
+            if (pendingRoleChanges.size > 0) return;
+
+            // SAFEGUARD 2: Don't sync if workspace is dirty (recent changes)
+            if (dirtyWorkspaces.has(currentWorkspaceId)) return;
+
+            // SAFEGUARD 3: Don't sync if operation in progress
+            if (cacheBuildingPaused || operationInProgress) return;
+
+            if (!currentWorkspaceId) return;
+
+            // Only sync if cache is expired
+            if (isCacheExpired(currentWorkspaceId)) {
+                console.log('Background sync: Refreshing current workspace');
+                await refreshSingleWorkspace(currentWorkspaceId);
+            }
+        }
+
+        // Proposal 5: Start background sync
+        function startBackgroundSync() {
+            stopBackgroundSync(); // Clear any existing timer
+            backgroundSyncTimer = setInterval(backgroundSync, BACKGROUND_SYNC_INTERVAL);
+        }
+
+        // Proposal 5: Stop background sync
+        function stopBackgroundSync() {
+            if (backgroundSyncTimer) {
+                clearInterval(backgroundSyncTimer);
+                backgroundSyncTimer = null;
+            }
+        }
+        let adminSelectedWorkspaceId = null; // Selected workspace in admin mode
+        let adminSelectedUser = null; // Selected user in admin mode
+        let adminMode = 'workspace'; // 'workspace' or 'user'
+        let adminSuggestionTimeout = null; // Debounce for admin autocomplete
+
         // Reusable alert element for performance
         let alertElement = null;
         let alertTimeout = null;
@@ -668,6 +956,12 @@
 
         // Generic bulk operation handler to eliminate code duplication
         async function executeBulkOperation(config) {
+            // SAFEGUARD 3: Prevent concurrent operations
+            if (operationInProgress) {
+                showAlert('Please wait for the current operation to complete', 'warning');
+                return;
+            }
+
             const {
                 items,              // Array or Set of items to process
                 permissionCheck,    // Function to check permissions
@@ -691,6 +985,9 @@
 
             // Confirm with user
             if (confirmMessage && !confirm(confirmMessage)) return;
+
+            operationInProgress = true;
+            try {
 
             // Convert Set to Array if needed
             const itemArray = items instanceof Set ? Array.from(items) : items;
@@ -753,7 +1050,10 @@
             }
 
             return { successCount, failureCount, errors };
+        } finally {
+            operationInProgress = false;
         }
+    }
 
         // Update workspace user cache in-memory (no refetch)
         function updateUserInCache(workspaceId, identifier, updates) {
@@ -850,6 +1150,13 @@
             allWorkspaces = [];
             sessionStorage.removeItem('pbi_token');
 
+            // Clear admin state
+            isPowerBIAdmin = false;
+            adminWorkspaces = [];
+            adminWorkspaceCache.clear();
+            adminSelectedWorkspaceId = null;
+            adminSelectedUser = null;
+
             // Reset UI
             document.getElementById('authStatus').className = 'status-badge not-authenticated';
             document.getElementById('authStatus').innerHTML = '⚠️ Not Authenticated';
@@ -920,6 +1227,12 @@
                     // Get current user email from token
                     getCurrentUserFromToken(token);
 
+                    // Check if user has admin permissions
+                    await checkAdminStatus();
+
+                    // Show/hide admin panel based on status
+                    updateAdminPanelVisibility();
+
                     await loadWorkspaces();
                 } else {
                     throw new Error('Invalid token');
@@ -941,15 +1254,673 @@
             }
         }
 
+        // Check if current user has Power BI Administrator role
+        async function checkAdminStatus() {
+            try {
+                // Try to call admin-only endpoint
+                const response = await apiCall('https://api.powerbi.com/v1.0/myorg/admin/groups?$top=1');
+
+                if (response.ok) {
+                    isPowerBIAdmin = true;
+                    console.info('✅ Power BI Administrator access detected');
+                    return true;
+                }
+            } catch (error) {
+                console.info('ℹ️ User does not have Power BI Administrator access');
+            }
+
+            isPowerBIAdmin = false;
+            return false;
+        }
+
+        // Show/hide admin panel based on admin status
+        function updateAdminPanelVisibility() {
+            const adminBtn = document.getElementById('adminViewBtn');
+            if (isPowerBIAdmin) {
+                adminBtn.style.display = 'inline-block';
+
+                // Add admin badge to auth status
+                const authStatus = document.getElementById('authStatus');
+                if (!authStatus.innerHTML.includes('ADMIN')) {
+                    authStatus.innerHTML += ' <span class="admin-badge">ADMIN</span>';
+                }
+            } else {
+                adminBtn.style.display = 'none';
+            }
+        }
+
         // VIEW SWITCHER
         function switchView(view) {
             currentView = view;
             document.getElementById('workspaceView').style.display = view === 'workspace' ? 'block' : 'none';
             document.getElementById('userView').style.display = view === 'user' ? 'block' : 'none';
+            document.getElementById('adminView').style.display = view === 'admin' ? 'block' : 'none';
+
             document.getElementById('workspaceViewBtn').classList.toggle('active', view === 'workspace');
             document.getElementById('userViewBtn').classList.toggle('active', view === 'user');
+            document.getElementById('adminViewBtn').classList.toggle('active', view === 'admin');
+
+            // Load admin workspaces when switching to admin view
+            if (view === 'admin' && isPowerBIAdmin && adminWorkspaces.length === 0) {
+                loadAdminWorkspaces();
+            }
         }
-        
+
+        // Admin mode switcher (workspace vs user assignment)
+        function switchAdminMode(mode) {
+            adminMode = mode;
+            document.getElementById('adminAssignToWorkspace').style.display = mode === 'workspace' ? 'block' : 'none';
+            document.getElementById('adminAssignToUser').style.display = mode === 'user' ? 'block' : 'none';
+
+            document.getElementById('adminModeWorkspaceBtn').classList.toggle('active', mode === 'workspace');
+            document.getElementById('adminModeUserBtn').classList.toggle('active', mode === 'user');
+        }
+
+        // ============================================
+        // ADMIN PANEL FUNCTIONS
+        // ============================================
+
+        // Load all organizational workspaces (admin only)
+        async function loadAdminWorkspaces() {
+            if (!isPowerBIAdmin) {
+                showAlert('Admin access required', 'error');
+                return;
+            }
+
+            try {
+                showAlert('Loading all organizational workspaces...', 'info');
+
+                // Admin endpoint to get ALL workspaces with pagination support
+                let allWorkspaces = [];
+                let nextLink = 'https://api.powerbi.com/v1.0/myorg/admin/groups?$top=5000';
+
+                // Fetch all pages
+                while (nextLink) {
+                    const response = await apiCall(nextLink);
+
+                    if (!response.ok) {
+                        if (response.status === 403) {
+                            // Permission revoked mid-session
+                            isPowerBIAdmin = false;
+                            updateAdminPanelVisibility();
+                            switchView('workspace');
+                            showAlert('Admin access revoked. Returning to normal view.', 'error');
+                            return;
+                        }
+                        throw new Error('Failed to load admin workspaces');
+                    }
+
+                    const data = await response.json();
+                    allWorkspaces = allWorkspaces.concat(data.value || []);
+
+                    // Check for next page
+                    nextLink = data['@odata.nextLink'] || null;
+
+                    if (nextLink) {
+                        showAlert(`Loading workspaces... (${allWorkspaces.length} loaded)`, 'info');
+                    }
+                }
+
+                // Filter out personal workspaces (Type = "PersonalGroup" or "PersonalWorkspace" or name starts with "PersonalWorkspace")
+                adminWorkspaces = allWorkspaces.filter(ws => {
+                    const isPersonalType = ws.type === 'PersonalGroup' || ws.type === 'PersonalWorkspace';
+                    const isPersonalName = ws.name && ws.name.startsWith('PersonalWorkspace');
+                    return !isPersonalType && !isPersonalName;
+                });
+
+                // Cache by ID for quick lookup
+                adminWorkspaces.forEach(ws => {
+                    adminWorkspaceCache.set(ws.id, ws);
+                });
+
+                const filteredCount = allWorkspaces.length - adminWorkspaces.length;
+                showAlert(`Loaded ${adminWorkspaces.length} organizational workspaces (${filteredCount} personal workspaces excluded)`, 'success');
+
+            } catch (error) {
+                console.error('Error loading admin workspaces:', error);
+                showAlert('Failed to load admin workspaces', 'error');
+            }
+        }
+
+        // Show workspace suggestions in admin mode (standardized pattern)
+        function showAdminWorkspaceSuggestions() {
+            clearTimeout(adminSuggestionTimeout);
+            adminSuggestionTimeout = setTimeout(() => {
+                const input = document.getElementById('adminWorkspaceSearch');
+                const dropdown = document.getElementById('adminWorkspaceSuggestions');
+                if (!input || !dropdown) return;
+
+                const searchTerm = input.value.trim().toLowerCase();
+
+                if (searchTerm.length === 0 || adminWorkspaces.length === 0) {
+                    dropdown.style.display = 'none';
+                    return;
+                }
+
+                // Filter and sort workspaces
+                const matches = adminWorkspaces
+                    .filter(ws => ws.name && ws.name.toLowerCase().includes(searchTerm))
+                    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+                    .slice(0, 20);
+
+                if (matches.length === 0) {
+                    dropdown.style.display = 'none';
+                    return;
+                }
+
+                // Build dropdown HTML
+                dropdown.innerHTML = matches.map(ws => `
+                    <div class="user-search-item" onclick="selectAdminWorkspace('${escapeHtml(ws.id)}')">
+                        <div style="width: 32px; height: 32px; border-radius: 6px; background: #004d90; display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">📁</div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600;">${escapeHtml(ws.name)}</div>
+                            <div style="font-size: 11px; color: #666;">${ws.type || 'Workspace'}</div>
+                        </div>
+                    </div>
+                `).join('');
+
+                dropdown.style.display = 'block';
+            }, 150);
+        }
+
+        // Hide admin workspace suggestions
+        function hideAdminWorkspaceSuggestions() {
+            const dropdown = document.getElementById('adminWorkspaceSuggestions');
+            setTimeout(() => {
+                dropdown.style.display = 'none';
+            }, 200);
+        }
+
+        // Select workspace in admin mode
+        function selectAdminWorkspace(workspaceId) {
+            const workspace = adminWorkspaceCache.get(workspaceId);
+            if (!workspace) return;
+
+            adminSelectedWorkspaceId = workspaceId;
+
+            // Update UI
+            document.getElementById('adminSelectedWorkspaceName').textContent = workspace.name;
+            document.getElementById('adminSelectedWorkspaceInfo').style.display = 'block';
+            document.getElementById('adminBulkAddBtn').style.display = 'inline-block';
+
+            // Hide dropdown
+            document.getElementById('adminWorkspaceSuggestions').style.display = 'none';
+
+            // Clear search input
+            document.getElementById('adminWorkspaceSearch').value = '';
+        }
+
+        // Track selected users for bulk add modal
+        let adminBulkSelectedUsers = [];
+
+        // Show bulk add modal for admin mode
+        function showAdminBulkAddModal() {
+            if (!adminSelectedWorkspaceId) {
+                showAlert('Select a workspace first', 'error');
+                return;
+            }
+
+            const workspace = adminWorkspaceCache.get(adminSelectedWorkspaceId);
+            const workspaceName = workspace ? workspace.name : 'selected workspace';
+
+            // Reset selected users
+            adminBulkSelectedUsers = [];
+
+            // Create modal with search dropdown pattern
+            const modal = document.createElement('div');
+            modal.className = 'modal active';
+            modal.id = 'adminBulkAddModal';
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 700px;">
+                    <div class="modal-header">
+                        <h2>➕ Add Users/Groups to ${escapeHtml(workspaceName)}</h2>
+                    </div>
+                    <div class="modal-body">
+                        <div style="padding: 15px; background: #fff3cd; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #ffc107;">
+                            <strong>⚠️ Admin Mode:</strong> You can add any user/group to this workspace
+                        </div>
+                        <div class="form-group">
+                            <label>Search Users/Groups</label>
+                            <div style="position: relative;">
+                                <input type="text" id="adminBulkUserSearch"
+                                       placeholder="🔍 Type to search users or groups..."
+                                       oninput="showAdminBulkUserSuggestions()"
+                                       onfocus="showAdminBulkUserSuggestions()"
+                                       autocomplete="off">
+                                <div id="adminBulkUserSuggestions" class="user-search-dropdown" style="display: none;"></div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Selected Users/Groups (<span id="adminBulkSelectedCount">0</span>)</label>
+                            <div id="adminBulkSelectedList" style="max-height: 200px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px; min-height: 60px;">
+                                <div style="text-align: center; color: #999; padding: 20px;">Search and click users/groups to add them</div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Role</label>
+                            <select id="adminBulkRole">
+                                <option value="Viewer">Viewer</option>
+                                <option value="Contributor">Contributor</option>
+                                <option value="Member">Member</option>
+                                <option value="Admin">Admin</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button onclick="closeAdminBulkAddModal()" class="button-secondary">Cancel</button>
+                        <button onclick="executeAdminBulkAdd()" class="button-success">Add All</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        // Show user suggestions for bulk add
+        function showAdminBulkUserSuggestions() {
+            clearTimeout(adminSuggestionTimeout);
+            adminSuggestionTimeout = setTimeout(() => {
+                const input = document.getElementById('adminBulkUserSearch');
+                const dropdown = document.getElementById('adminBulkUserSuggestions');
+                if (!input || !dropdown) return;
+
+                const searchTerm = input.value.trim().toLowerCase();
+
+                if (searchTerm.length === 0 || knownUsers.size === 0) {
+                    dropdown.style.display = 'none';
+                    return;
+                }
+
+                // Filter users/groups from known users
+                const matches = Array.from(knownUsers.values())
+                    .filter(user => {
+                        const email = (user.email || '').toLowerCase();
+                        const displayName = (user.displayName || '').toLowerCase();
+                        return email.includes(searchTerm) || displayName.includes(searchTerm);
+                    })
+                    .slice(0, 25);
+
+                if (matches.length === 0) {
+                    dropdown.style.display = 'none';
+                    return;
+                }
+
+                dropdown.innerHTML = matches.map(user => `
+                    <div class="user-search-item" onclick="addUserToBulkSelection('${escapeHtml(user.identifier || user.email)}', '${escapeHtml(user.displayName || user.email)}', '${user.principalType || 'User'}')">
+                        <div class="user-avatar">${getInitials(user.displayName || user.email)}</div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600;">${escapeHtml(user.displayName || user.email)}</div>
+                            <div style="font-size: 11px; color: #666;">${escapeHtml(user.email || user.identifier)}
+                                ${user.principalType === 'Group' ? '<span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-left: 5px;">GROUP</span>' : ''}
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+
+                dropdown.style.display = 'block';
+            }, 150);
+        }
+
+        // Add user to bulk selection list
+        function addUserToBulkSelection(identifier, displayName, principalType) {
+            // Check if already added
+            if (adminBulkSelectedUsers.some(u => u.identifier === identifier)) {
+                showAlert('User/group already added', 'info');
+                return;
+            }
+
+            // Add to selection
+            adminBulkSelectedUsers.push({ identifier, displayName, principalType });
+
+            // Update UI
+            updateAdminBulkSelectedList();
+
+            // Clear and hide search
+            document.getElementById('adminBulkUserSearch').value = '';
+            document.getElementById('adminBulkUserSuggestions').style.display = 'none';
+        }
+
+        // Remove user from bulk selection
+        function removeUserFromBulkSelection(identifier) {
+            adminBulkSelectedUsers = adminBulkSelectedUsers.filter(u => u.identifier !== identifier);
+            updateAdminBulkSelectedList();
+        }
+
+        // Update the selected users list UI
+        function updateAdminBulkSelectedList() {
+            const listContainer = document.getElementById('adminBulkSelectedList');
+            const countSpan = document.getElementById('adminBulkSelectedCount');
+
+            if (!listContainer || !countSpan) return;
+
+            countSpan.textContent = adminBulkSelectedUsers.length;
+
+            if (adminBulkSelectedUsers.length === 0) {
+                listContainer.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">Search and click users/groups to add them</div>';
+                return;
+            }
+
+            listContainer.innerHTML = adminBulkSelectedUsers.map(user => `
+                <div style="display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #e0e0e0; background: #f8f9fa; margin-bottom: 5px; border-radius: 4px;">
+                    <div class="user-avatar" style="margin-right: 10px;">${getInitials(user.displayName)}</div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600; font-size: 13px;">${escapeHtml(user.displayName)}</div>
+                        <div style="font-size: 11px; color: #666;">${escapeHtml(user.identifier)}
+                            ${user.principalType === 'Group' ? '<span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-left: 5px;">GROUP</span>' : ''}
+                        </div>
+                    </div>
+                    <button onclick="removeUserFromBulkSelection('${escapeHtml(user.identifier)}')"
+                            class="button-secondary"
+                            style="padding: 5px 10px; font-size: 12px;">Remove</button>
+                </div>
+            `).join('');
+        }
+
+        // Close bulk add modal
+        function closeAdminBulkAddModal() {
+            const modal = document.getElementById('adminBulkAddModal');
+            if (modal) modal.remove();
+        }
+
+        // Execute bulk add operation in admin mode
+        async function executeAdminBulkAdd() {
+            const role = document.getElementById('adminBulkRole').value;
+
+            if (adminBulkSelectedUsers.length === 0) {
+                showAlert('Select at least one user/group', 'error');
+                return;
+            }
+
+            const userCount = adminBulkSelectedUsers.filter(u => u.principalType === 'User').length;
+            const groupCount = adminBulkSelectedUsers.filter(u => u.principalType === 'Group').length;
+            const summary = userCount > 0 && groupCount > 0
+                ? `${userCount} user(s) and ${groupCount} group(s)`
+                : userCount > 0 ? `${userCount} user(s)` : `${groupCount} group(s)`;
+
+            if (!confirm(`Add ${summary} to workspace as ${role}?`)) {
+                return;
+            }
+
+            closeAdminBulkAddModal();
+
+            // Use bulk operation handler
+            await executeBulkOperation({
+                items: adminBulkSelectedUsers,
+                permissionCheck: () => isPowerBIAdmin,
+                confirmMessage: null, // Already confirmed
+                buildPayload: (user) => ({
+                    workspaceId: adminSelectedWorkspaceId,
+                    user: user,
+                    payload: {
+                        emailAddress: user.identifier,
+                        identifier: user.identifier,
+                        groupUserAccessRight: role,
+                        principalType: user.principalType
+                    }
+                }),
+                apiCall: async ({ workspaceId, payload }) => {
+                    return await apiCall(
+                        `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`,
+                        { method: 'POST', body: JSON.stringify(payload) }
+                    );
+                },
+                successMessage: `Successfully added {count} user(s)/group(s) to workspace (Admin)`,
+                errorMessage: `Failed to add users/groups to workspace`,
+                partialMessage: `Added {success} user(s)/group(s), {failure} failed (Admin)`
+            });
+        }
+
+        // Admin user search suggestions (standardized pattern)
+        function showAdminUserSuggestions() {
+            clearTimeout(adminSuggestionTimeout);
+            adminSuggestionTimeout = setTimeout(() => {
+                const input = document.getElementById('adminUserSearch');
+                const dropdown = document.getElementById('adminUserSuggestions');
+                if (!input || !dropdown) return;
+
+                const searchTerm = input.value.trim().toLowerCase();
+
+                if (searchTerm.length === 0 || knownUsers.size === 0) {
+                    dropdown.style.display = 'none';
+                    return;
+                }
+
+                // Search from known users cache
+                const matches = Array.from(knownUsers.values())
+                    .filter(user => {
+                        const email = (user.email || '').toLowerCase();
+                        const displayName = (user.displayName || '').toLowerCase();
+                        return email.includes(searchTerm) || displayName.includes(searchTerm);
+                    })
+                    .slice(0, 25);
+
+                if (matches.length === 0) {
+                    dropdown.style.display = 'none';
+                    return;
+                }
+
+                dropdown.innerHTML = matches.map(user => `
+                    <div class="user-search-item" onclick="selectAdminUser('${escapeHtml(user.identifier || user.email)}', '${escapeHtml(user.displayName || user.email)}', '${user.principalType || 'User'}')">
+                        <div class="user-avatar">${getInitials(user.displayName || user.email)}</div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600;">${escapeHtml(user.displayName || user.email)}</div>
+                            <div style="font-size: 11px; color: #666;">${escapeHtml(user.email || user.identifier)}
+                                ${user.principalType === 'Group' ? '<span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-left: 5px;">GROUP</span>' : ''}
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+
+                dropdown.style.display = 'block';
+            }, 150);
+        }
+
+        // Hide admin user suggestions
+        function hideAdminUserSuggestions() {
+            const dropdown = document.getElementById('adminUserSuggestions');
+            setTimeout(() => {
+                dropdown.style.display = 'none';
+            }, 200);
+        }
+
+        // Select user in admin mode (for mode 2)
+        function selectAdminUser(identifier, displayName, principalType) {
+            adminSelectedUser = {
+                identifier: identifier,
+                displayName: displayName,
+                principalType: principalType || 'User'
+            };
+
+            // Update UI
+            document.getElementById('adminSelectedUserName').textContent = displayName;
+            document.getElementById('adminSelectedUserInfo').style.display = 'block';
+            document.getElementById('adminBulkWorkspaceBtn').style.display = 'inline-block';
+
+            // Hide dropdown
+            document.getElementById('adminUserSuggestions').style.display = 'none';
+
+            // Clear search input
+            document.getElementById('adminUserSearch').value = '';
+        }
+
+        // Show bulk workspace assignment modal (Mode 2)
+        function showAdminBulkWorkspaceModal() {
+            if (!adminSelectedUser) {
+                showAlert('Select a user/group first', 'error');
+                return;
+            }
+
+            // Create modal with workspace selection
+            const modal = document.createElement('div');
+            modal.className = 'modal active';
+            modal.id = 'adminBulkWorkspaceModal';
+
+            // Generate workspace checkboxes (initially all workspaces, limited to 200)
+            const workspacesToShow = adminWorkspaces.slice(0, 200);
+
+            // Debug: Log first few workspace names
+            console.log('Creating modal with workspaces:', workspacesToShow.slice(0, 3).map(ws => ({ name: ws.name, lowerName: (ws.name || '').toLowerCase() })));
+
+            const workspaceCheckboxes = workspacesToShow
+                .map(ws => {
+                    const lowercaseName = (ws.name || '').toLowerCase();
+                    const escapedLowercaseName = escapeHtml(lowercaseName);
+                    return `
+                    <label class="workspace-item" data-workspace-name="${escapedLowercaseName}" style="display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #e0e0e0; cursor: pointer;">
+                        <input type="checkbox" value="${escapeHtml(ws.id)}" style="margin-right: 10px; cursor: pointer;">
+                        <span>${escapeHtml(ws.name)}</span>
+                    </label>
+                    `;
+                }).join('');
+
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 700px;">
+                    <div class="modal-header" style="background: #ffc107; color: #000;">
+                        <h2>➕ Add to Multiple Workspaces (Admin Mode)</h2>
+                    </div>
+                    <div class="modal-body">
+                        <div style="padding: 15px; background: #d4edda; border-radius: 6px; margin-bottom: 20px; border: 2px solid #28a745;">
+                            <strong style="color: #155724;">✓ Selected:</strong> <span style="color: #155724; font-weight: 600;">${escapeHtml(adminSelectedUser.displayName)}</span>
+                            ${adminSelectedUser.principalType === 'Group' ? '<span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-left: 5px;">GROUP</span>' : ''}
+                        </div>
+
+                        <div class="form-group">
+                            <label>Role</label>
+                            <select id="adminBulkWorkspaceRole" style="width: 100%; padding: 10px; border: 2px solid #999999; border-radius: 6px;">
+                                <option value="Viewer">Viewer</option>
+                                <option value="Contributor">Contributor</option>
+                                <option value="Member">Member</option>
+                                <option value="Admin">Admin</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Search & Select Workspaces</label>
+                            <input type="text" id="adminWorkspaceSearchInput"
+                                   placeholder="🔍 Type to filter workspaces..."
+                                   oninput="filterAdminWorkspaceList()"
+                                   style="width: 100%; padding: 10px; border: 2px solid #004d90; border-radius: 6px; margin-bottom: 10px;">
+                            <div style="margin-bottom: 10px; display: flex; gap: 10px;">
+                                <button onclick="selectAllAdminWorkspaces(true)" class="button-secondary" style="padding: 5px 10px; font-size: 12px;">Select All Visible</button>
+                                <button onclick="selectAllAdminWorkspaces(false)" class="button-secondary" style="padding: 5px 10px; font-size: 12px;">Deselect All</button>
+                            </div>
+                            <div id="workspaceListContainer" style="max-height: 300px; overflow-y: auto; border: 2px solid #999999; border-radius: 6px;">
+                                ${workspaceCheckboxes}
+                            </div>
+                            <p style="font-size: 11px; color: #666; margin-top: 5px;">
+                                ℹ️ Showing up to 200 workspaces. Use search above to filter by name.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button onclick="closeAdminBulkWorkspaceModal()" class="button-secondary">Cancel</button>
+                        <button onclick="executeAdminBulkWorkspaceAssignment()" class="button-success">Add to Selected</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        // Filter admin workspace list (copied from working filterAvailableWorkspaces pattern)
+        function filterAdminWorkspaceList() {
+            const searchTerm = document.getElementById('adminWorkspaceSearchInput').value.toLowerCase();
+            const items = document.querySelectorAll('#adminBulkWorkspaceModal .workspace-item');
+
+            let visibleCount = 0;
+            items.forEach(item => {
+                const text = item.textContent.toLowerCase();
+                const matches = text.includes(searchTerm);
+
+                if (matches) {
+                    item.style.display = 'flex';
+                    item.removeAttribute('data-hidden');
+                    visibleCount++;
+                } else {
+                    item.style.display = 'none';
+                    item.setAttribute('data-hidden', 'true');
+                }
+            });
+
+            // Update status message
+            const modal = document.getElementById('adminBulkWorkspaceModal');
+            if (modal && searchTerm !== '') {
+                const statusMsg = modal.querySelector('.modal-body p[style*="font-size: 11px"]');
+                if (statusMsg) {
+                    statusMsg.innerHTML = `ℹ️ Showing <strong>${visibleCount}</strong> workspace(s) matching "<strong>${escapeHtml(searchTerm)}</strong>"`;
+                    statusMsg.style.color = visibleCount > 0 ? '#004d90' : '#dc3545';
+                    statusMsg.style.fontWeight = '600';
+                }
+            }
+        }
+
+        // Select/deselect all visible workspaces
+        function selectAllAdminWorkspaces(select) {
+            const modal = document.getElementById('adminBulkWorkspaceModal');
+            if (!modal) return;
+
+            // Only select/deselect visible workspace items (not hidden)
+            const allItems = modal.querySelectorAll('.workspace-item');
+            allItems.forEach(item => {
+                // Check if item is visible (not hidden by filter)
+                const isHidden = item.getAttribute('data-hidden') === 'true' || item.style.display === 'none';
+                if (!isHidden) {
+                    const checkbox = item.querySelector('input[type="checkbox"]');
+                    if (checkbox) checkbox.checked = select;
+                }
+            });
+        }
+
+        // Close bulk workspace modal
+        function closeAdminBulkWorkspaceModal() {
+            const modal = document.getElementById('adminBulkWorkspaceModal');
+            if (modal) modal.remove();
+        }
+
+        // Execute bulk workspace assignment
+        async function executeAdminBulkWorkspaceAssignment() {
+            const modal = document.getElementById('adminBulkWorkspaceModal');
+            if (!modal) return;
+
+            const checkboxes = modal.querySelectorAll('input[type="checkbox"]:checked');
+            const selectedWorkspaceIds = Array.from(checkboxes).map(cb => cb.value);
+            const role = document.getElementById('adminBulkWorkspaceRole').value;
+
+            if (selectedWorkspaceIds.length === 0) {
+                showAlert('Select at least one workspace', 'error');
+                return;
+            }
+
+            if (!confirm(`Add ${adminSelectedUser.displayName} to ${selectedWorkspaceIds.length} workspace(s) as ${role}?`)) {
+                return;
+            }
+
+            closeAdminBulkWorkspaceModal();
+
+            // Use bulk operation handler
+            await executeBulkOperation({
+                items: selectedWorkspaceIds,
+                permissionCheck: () => isPowerBIAdmin,
+                confirmMessage: null, // Already confirmed
+                buildPayload: (workspaceId) => ({
+                    workspaceId: workspaceId,
+                    payload: {
+                        emailAddress: adminSelectedUser.identifier,
+                        identifier: adminSelectedUser.identifier,
+                        groupUserAccessRight: role,
+                        principalType: adminSelectedUser.principalType
+                    }
+                }),
+                apiCall: async ({ workspaceId, payload }) => {
+                    return await apiCall(
+                        `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/users`,
+                        { method: 'POST', body: JSON.stringify(payload) }
+                    );
+                },
+                successMessage: `Successfully added ${adminSelectedUser.principalType.toLowerCase()} to {count} workspace(s) (Admin)`,
+                errorMessage: `Failed to add ${adminSelectedUser.principalType.toLowerCase()} to workspaces`,
+                partialMessage: `Added to {success} workspace(s), {failure} failed (Admin)`
+            });
+        }
+
         // WORKSPACE VIEW FUNCTIONS
         async function loadWorkspaces() {
             try {
@@ -1083,12 +2054,18 @@
             document.getElementById('selectedWorkspaceName').textContent = workspace.name;
             document.getElementById('workspaceInfo').textContent = workspace.name;
             document.getElementById('addUserBtn').style.display = 'block';
-            
+
             showAlert('Loading users...', 'info');
             await loadWorkspaceUsers();
+
+            // OPTIMIZATION 5: Start background sync for this workspace
+            startBackgroundSync();
         }
-        
+
         function clearWorkspaceSelection() {
+            // OPTIMIZATION 5: Stop background sync when no workspace selected
+            stopBackgroundSync();
+
             currentWorkspaceId = null;
             allUsers = [];
             selectedUsers.clear();
@@ -1106,8 +2083,8 @@
             tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px;"><div class="loading-spinner"></div></td></tr>';
 
             try {
-                // Check if we have cached data for this workspace
-                if (workspaceUserMap.has(currentWorkspaceId)) {
+                // OPTIMIZATION 4: Check if we have valid cached data (not expired)
+                if (workspaceUserMap.has(currentWorkspaceId) && !isCacheExpired(currentWorkspaceId)) {
                     allUsers = workspaceUserMap.get(currentWorkspaceId);
                     buildUserIndex();
                     updateCurrentUserRole();
@@ -1123,8 +2100,8 @@
                 // Build O(1) lookup index
                 buildUserIndex();
 
-                // Update cache
-                workspaceUserMap.set(currentWorkspaceId, allUsers);
+                // OPTIMIZATION 4: Update cache with TTL
+                setCacheWithTTL(currentWorkspaceId, allUsers);
                 cacheUsersFromWorkspace(allUsers);
 
                 // Determine current user's role in this workspace
@@ -1662,6 +2639,13 @@
             // Re-render with updated cache (no API call needed!)
             buildUserIndex();
             renderUsers();
+
+            // OPTIMIZATION 4 & 6: Update TTL and mark for verification
+            if (successCount > 0) {
+                workspaceCacheTTL.set(currentWorkspaceId, Date.now() + CACHE_TTL);
+                markWorkspaceDirty(currentWorkspaceId);
+                requestDebouncedRefresh();
+            }
         }
 
         function cancelPendingRoleChanges() {
@@ -1746,6 +2730,12 @@
         }
 
         async function addUser() {
+            // SAFEGUARD 3: Prevent concurrent operations
+            if (operationInProgress) {
+                showAlert('Please wait for the current operation to complete', 'warning');
+                return;
+            }
+
             // Check permission first
             if (!canEditWorkspace()) {
                 showAlert('You need Admin or Member role to add users', 'error');
@@ -1761,6 +2751,7 @@
                 return;
             }
 
+            operationInProgress = true;
             try {
                 const payload = {
                     emailAddress: email,
@@ -1777,21 +2768,44 @@
                 if (response.ok) {
                     showAlert('User added', 'success');
                     closeAddUserModal();
-                    // Pause cache building during update
-                    cacheBuildingPaused = true;
-                    workspaceUserMap.delete(currentWorkspaceId);
-                    await loadWorkspaceUsers();
-                    cacheBuildingPaused = false;
+
+                    // OPTIMIZATION 1: Optimistic update - update cache immediately
+                    optimisticAddUser(currentWorkspaceId, {
+                        identifier: email,
+                        email: email,
+                        displayName: email,
+                        principalType: type
+                    }, role);
+
+                    // Update current view
+                    allUsers = workspaceUserMap.get(currentWorkspaceId);
+                    buildUserIndex();
+                    updateCurrentUserRole();
+                    renderUsers();
+
+                    // OPTIMIZATION 6: Mark as dirty for background verification
+                    markWorkspaceDirty(currentWorkspaceId);
+                    requestDebouncedRefresh();
                 } else {
                     throw new Error('Failed to add user');
                 }
             } catch (error) {
                 showAlert('Failed to add user', 'error');
-                cacheBuildingPaused = false;
+                // On error, force refresh to get accurate state
+                workspaceUserMap.delete(currentWorkspaceId);
+                await loadWorkspaceUsers();
+            } finally {
+                operationInProgress = false;
             }
         }
 
         async function removeUser(identifier) {
+            // SAFEGUARD 3: Prevent concurrent operations
+            if (operationInProgress) {
+                showAlert('Please wait for the current operation to complete', 'warning');
+                return;
+            }
+
             // Check permission first
             if (!canEditWorkspace()) {
                 showAlert('You need Admin or Member role to remove users', 'error');
@@ -1801,6 +2815,7 @@
             const user = allUsersById.get(identifier);
             if (!user || !confirm(`Remove ${user.displayName || user.emailAddress}?`)) return;
 
+            operationInProgress = true;
             try {
                 const response = await apiCall(
                     `https://api.powerbi.com/v1.0/myorg/groups/${currentWorkspaceId}/users/${encodeURIComponent(identifier)}`,
@@ -1809,15 +2824,27 @@
 
                 if (response.ok) {
                     showAlert('User removed', 'success');
-                    cacheBuildingPaused = true;
-                    workspaceUserMap.delete(currentWorkspaceId);
-                    await loadWorkspaceUsers();
-                    updateKnownUsersCacheForWorkspace(currentWorkspaceId, allUsers);
-                    cacheBuildingPaused = false;
+
+                    // OPTIMIZATION 1: Optimistic update - remove from cache immediately
+                    optimisticRemoveUser(currentWorkspaceId, identifier);
+
+                    // Update current view
+                    allUsers = workspaceUserMap.get(currentWorkspaceId);
+                    buildUserIndex();
+                    updateCurrentUserRole();
+                    renderUsers();
+
+                    // OPTIMIZATION 6: Mark as dirty for background verification
+                    markWorkspaceDirty(currentWorkspaceId);
+                    requestDebouncedRefresh();
                 }
             } catch (error) {
                 showAlert('Failed to remove user', 'error');
-                cacheBuildingPaused = false;
+                // On error, force refresh to get accurate state
+                workspaceUserMap.delete(currentWorkspaceId);
+                await loadWorkspaceUsers();
+            } finally {
+                operationInProgress = false;
             }
         }
 
@@ -2828,6 +3855,15 @@
             if (!e.target.closest('#newUserEmail') && !e.target.closest('#addUserSuggestions')) {
                 document.getElementById('addUserSuggestions').style.display = 'none';
             }
+            // Admin panel dropdowns
+            if (!e.target.closest('#adminWorkspaceSearch') && !e.target.closest('#adminWorkspaceSuggestions')) {
+                const adminWorkspaceDropdown = document.getElementById('adminWorkspaceSuggestions');
+                if (adminWorkspaceDropdown) adminWorkspaceDropdown.style.display = 'none';
+            }
+            if (!e.target.closest('#adminUserSearch') && !e.target.closest('#adminUserSuggestions')) {
+                const adminUserDropdown = document.getElementById('adminUserSuggestions');
+                if (adminUserDropdown) adminUserDropdown.style.display = 'none';
+            }
         });
 
         // Event delegation for user table (workspace view)
@@ -2884,6 +3920,20 @@
                 document.getElementById('manualToken').value = cached;
                 authenticateWithToken();
             }
+        });
+
+        // SAFEGUARD: Memory leak cleanup - Clear all timers on page unload
+        window.addEventListener('beforeunload', () => {
+            // Clear all active timers
+            stopBackgroundSync();
+            clearTimeout(refreshDebounceTimer);
+            clearTimeout(alertTimeout);
+            clearTimeout(workspaceSuggestionTimeout);
+            clearTimeout(userSuggestionTimeout);
+            clearTimeout(addUserSuggestionTimeout);
+            clearTimeout(adminSuggestionTimeout);
+
+            console.log('Cleanup: All timers cleared');
         });
     </script>
 </body>
