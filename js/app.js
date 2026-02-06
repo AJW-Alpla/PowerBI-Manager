@@ -433,6 +433,18 @@ const App = {
                 if (!health.valid) {
                     console.warn('[Init] Initial state issues:', health.issues);
                 }
+
+                // Start periodic health check to auto-clear stuck operations
+                setInterval(() => {
+                    if (AppState.operationInProgress && AppState.operationStartTime) {
+                        const duration = Date.now() - AppState.operationStartTime;
+                        // If operation has been running for more than 10 minutes, force clear it
+                        if (duration > 10 * 60 * 1000) {
+                            console.error(`[HealthCheck] Detected stuck operation running for ${Math.round(duration / 1000)}s - force clearing`);
+                            Diagnostics.clearStuckOperation();
+                        }
+                    }
+                }, 60 * 1000); // Check every 60 seconds
             }
 
             // Mark app as ready

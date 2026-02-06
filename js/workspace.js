@@ -457,13 +457,25 @@ const Workspace = {
      * Show add user modal
      */
     showAddUserModal() {
+        // Prevent opening modal if operation is in progress
+        if (AppState.operationInProgress) {
+            UI.showAlert('⏳ Please wait for the current operation to complete', 'warning');
+            return;
+        }
+
         if (!this.canEditWorkspace()) {
             UI.showAlert('You need Admin or Member role to add users', 'error');
             return;
         }
 
-        // Remove any existing modal first
-        this.closeAddUserModal();
+        // Remove ALL existing modals (both old HTML modal and any dynamic modals)
+        const existingModals = document.querySelectorAll('#addUserModal');
+        existingModals.forEach(modal => {
+            if (modal._cleanupHandlers) {
+                modal._cleanupHandlers();
+            }
+            modal.remove();
+        });
 
         // Reset selected users array
         this.selectedUsersForAdd = [];
@@ -513,7 +525,7 @@ const Workspace = {
         // Add modal to page
         document.body.insertAdjacentHTML('beforeend', modalHTML);
 
-        // Get elements
+        // Get elements with defensive checks
         const modal = document.getElementById('addUserModal');
         const input = document.getElementById('addUserEmailInput');
         const dropdown = document.getElementById('addUserSuggestionsDropdown');
@@ -521,17 +533,29 @@ const Workspace = {
         const cancelBtn = document.getElementById('cancelAddUserBtn');
         const executeBtn = document.getElementById('executeAddUserBtn');
 
-        // Close button handlers
-        if (closeBtn) closeBtn.addEventListener('click', () => this.closeAddUserModal());
-        cancelBtn.addEventListener('click', () => this.closeAddUserModal());
-        executeBtn.addEventListener('click', () => this.executeAddUser());
+        if (!modal || !cancelBtn || !executeBtn) {
+            console.error('[showAddUserModal] Critical elements missing!');
+            UI.showAlert('Modal failed to initialize. Please refresh the page.', 'error');
+            return;
+        }
 
-        // Close on background click
-        modal.addEventListener('click', (e) => {
+        // Create named handlers for proper cleanup
+        const closeBtnHandler = () => this.closeAddUserModal();
+        const cancelBtnHandler = () => this.closeAddUserModal();
+        const executeBtnHandler = () => this.executeAddUser();
+
+        // Attach button handlers
+        if (closeBtn) closeBtn.addEventListener('click', closeBtnHandler);
+        if (cancelBtn) cancelBtn.addEventListener('click', cancelBtnHandler);
+        if (executeBtn) executeBtn.addEventListener('click', executeBtnHandler);
+
+        // Close on background click (using named handler for cleanup)
+        const modalBackgroundHandler = (e) => {
             if (e.target === modal) {
                 this.closeAddUserModal();
             }
-        });
+        };
+        modal.addEventListener('click', modalBackgroundHandler);
 
         // ESC key to close
         const escHandler = (e) => {
@@ -633,12 +657,23 @@ const Workspace = {
 
         // Store handlers for cleanup
         modal._cleanupHandlers = () => {
+            // Remove document-level listeners
             document.removeEventListener('keydown', escHandler);
             document.removeEventListener('click', clickOutsideHandler);
+
+            // Remove modal listeners
+            modal.removeEventListener('click', modalBackgroundHandler);
+
+            // Remove button listeners
+            if (closeBtn) closeBtn.removeEventListener('click', closeBtnHandler);
+            if (cancelBtn) cancelBtn.removeEventListener('click', cancelBtnHandler);
+            if (executeBtn) executeBtn.removeEventListener('click', executeBtnHandler);
         };
 
         // Focus input
-        setTimeout(() => input.focus(), 100);
+        setTimeout(() => {
+            if (input) input.focus();
+        }, 100);
     },
 
     /**
@@ -729,25 +764,34 @@ const Workspace = {
      * Close add user modal
      */
     closeAddUserModal() {
-        const modal = document.getElementById('addUserModal');
-        if (modal) {
-            // Clean up event listeners if they exist (new modal)
-            if (modal._cleanupHandlers) {
-                modal._cleanupHandlers();
-                modal.remove(); // Remove dynamic modal
-            } else {
-                // Old modal from HTML - just hide it
-                modal.classList.remove('active');
+        // Remove ALL modals with this ID (handles duplicate ID issues)
+        const modals = document.querySelectorAll('#addUserModal');
+        if (modals.length === 0) return;
+
+        modals.forEach(modal => {
+            try {
+                // Clean up event listeners if they exist
+                if (modal._cleanupHandlers) {
+                    modal._cleanupHandlers();
+                }
+                // Remove the modal from DOM
+                modal.remove();
+            } catch (error) {
+                console.error('[closeAddUserModal] Error:', error);
+                // Force remove even if cleanup fails
+                try {
+                    modal.remove();
+                } catch (e) {
+                    console.error('[closeAddUserModal] Failed to force remove:', e);
+                }
             }
-        }
+        });
     },
 
     /**
      * Execute add user to workspace
      */
     async executeAddUser() {
-        console.log('[executeAddUser] Starting, operationInProgress:', AppState.operationInProgress);
-
         // Guard: Block if app is frozen or operation in progress
         if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('executeAddUser')) {
             if (AppState.operationInProgress) {
@@ -817,12 +861,6 @@ const Workspace = {
             return;
         }
 
-        // Disable button and show loading state
-        if (executeBtn) {
-            executeBtn.disabled = true;
-            executeBtn.innerHTML = '⏳ Adding...';
-        }
-
         // Close modal before operation
         this.closeAddUserModal();
 
@@ -863,8 +901,7 @@ const Workspace = {
             console.error('[executeAddUser] Error:', error);
             UI.showAlert('❌ Failed to add users', 'error');
         } finally {
-            console.log('[executeAddUser] Completed');
-            // Button cleanup is not needed since modal is closed, but clear state
+            // Clear state
             this.selectedUsersForAdd = [];
         }
     },
@@ -1238,5 +1275,47 @@ function addUserToSelectedList(identifier, displayName, principalType) {
 function removeUserFromSelectedList(identifier) {
     return Workspace.removeUserFromSelectedList(identifier);
 }
+
+// Diagnostic function - run from console to check modal state
+function debugModal() {
+    const modal = document.getElementById('addUserModal');
+    const closeBtn = document.getElementById('closeAddUserModalBtn');
+    const cancelBtn = document.getElementById('cancelAddUserBtn');
+    const executeBtn = document.getElementById('executeAddUserBtn');
+    const input = document.getElementById('addUserEmailInput');
+
+    console.log('=== MODAL DEBUG INFO ===');
+    console.log('Modal exists:', !!modal);
+    console.log('Modal visible:', modal ? modal.style.display !== 'none' : false);
+    console.log('Modal classList:', modal ? Array.from(modal.classList) : []);
+    console.log('Close button:', !!closeBtn, closeBtn ? 'enabled: ' + !closeBtn.disabled : '');
+    console.log('Cancel button:', !!cancelBtn, cancelBtn ? 'enabled: ' + !cancelBtn.disabled : '');
+    console.log('Execute button:', !!executeBtn, executeBtn ? 'enabled: ' + !executeBtn.disabled : '');
+    console.log('Input value:', input ? input.value : 'N/A');
+    console.log('operationInProgress:', AppState.operationInProgress);
+    console.log('Has cleanup handlers:', modal ? !!modal._cleanupHandlers : false);
+
+    if (cancelBtn) {
+        console.log('Cancel button computed styles:', {
+            pointerEvents: window.getComputedStyle(cancelBtn).pointerEvents,
+            opacity: window.getComputedStyle(cancelBtn).opacity,
+            zIndex: window.getComputedStyle(cancelBtn).zIndex,
+            display: window.getComputedStyle(cancelBtn).display
+        });
+
+        // Try to click it programmatically
+        console.log('Attempting programmatic click on Cancel button...');
+        cancelBtn.click();
+    }
+
+    return {
+        modalExists: !!modal,
+        buttonsExist: { closeBtn: !!closeBtn, cancelBtn: !!cancelBtn, executeBtn: !!executeBtn },
+        operationInProgress: AppState.operationInProgress
+    };
+}
+
+// Make it globally accessible
+window.debugModal = debugModal;
 
 // Workspace module loaded

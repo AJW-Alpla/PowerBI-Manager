@@ -396,8 +396,6 @@ const Admin = {
      * Execute bulk add operation in admin mode
      */
     async executeBulkAdd() {
-        console.log('[executeBulkAdd] Starting, operationInProgress:', AppState.operationInProgress);
-
         // Guard: Block if app is frozen or operation in progress
         if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('executeBulkAdd')) {
             if (AppState.operationInProgress) {
@@ -488,7 +486,6 @@ const Admin = {
             console.error('[executeBulkAdd] Error:', error);
             UI.showAlert('❌ Failed to add users/groups', 'error');
         } finally {
-            console.log('[executeBulkAdd] Completed');
             this.bulkSelectedUsers = [];
         }
     },
