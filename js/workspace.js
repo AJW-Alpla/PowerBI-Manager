@@ -746,8 +746,15 @@ const Workspace = {
      * Execute add user to workspace
      */
     async executeAddUser() {
-        // Guard: Block if app is frozen
+        console.log('[executeAddUser] Starting, operationInProgress:', AppState.operationInProgress);
+
+        // Guard: Block if app is frozen or operation in progress
         if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('executeAddUser')) {
+            if (AppState.operationInProgress) {
+                UI.showAlert('⏳ Please wait for the current operation to complete', 'warning');
+            } else {
+                UI.showAlert('⚠️ Action blocked - application may be in an invalid state', 'error');
+            }
             return;
         }
 
@@ -760,6 +767,7 @@ const Workspace = {
 
         const roleSelect = document.getElementById('addUserRoleSelect');
         const emailInput = document.getElementById('addUserEmailInput');
+        const executeBtn = document.getElementById('executeAddUserBtn');
 
         if (!roleSelect) {
             UI.showAlert('Modal not ready. Please try again.', 'error');
@@ -809,14 +817,21 @@ const Workspace = {
             return;
         }
 
+        // Disable button and show loading state
+        if (executeBtn) {
+            executeBtn.disabled = true;
+            executeBtn.innerHTML = '⏳ Adding...';
+        }
+
         // Close modal before operation
         this.closeAddUserModal();
 
         // Show loading indicator
         UI.showAlert(`Adding ${summary} to workspace...`, 'info');
 
-        // Use bulk operation handler
-        await API.executeBulkOperation({
+        try {
+            // Use bulk operation handler
+            await API.executeBulkOperation({
             items: this.selectedUsersForAdd,
             permissionCheck: () => this.canEditWorkspace(),
             confirmMessage: null, // Already confirmed
@@ -844,6 +859,14 @@ const Workspace = {
                 this.refreshCurrentWorkspace();
             }
         });
+        } catch (error) {
+            console.error('[executeAddUser] Error:', error);
+            UI.showAlert('❌ Failed to add users', 'error');
+        } finally {
+            console.log('[executeAddUser] Completed');
+            // Button cleanup is not needed since modal is closed, but clear state
+            this.selectedUsersForAdd = [];
+        }
     },
 
     /**

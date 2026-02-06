@@ -77,6 +77,7 @@ const AppState = {
 
     // Operation State
     operationInProgress: false,
+    operationStartTime: null, // Timestamp when operation started (for watchdog)
     currentUIState: 'init', // UIState enum: init, loading, ready, error, authenticating, refreshing
     lastError: null, // For retry functionality
 

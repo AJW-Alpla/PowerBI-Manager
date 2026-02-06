@@ -256,6 +256,17 @@ const API = {
         }
 
         AppState.operationInProgress = true;
+        AppState.operationStartTime = Date.now();
+        console.log('[API.executeBulkOperation] Operation started');
+
+        // Safety watchdog: Auto-clear stuck operations after 5 minutes
+        const watchdogTimer = setTimeout(() => {
+            if (AppState.operationInProgress) {
+                console.error('[API.executeBulkOperation] WATCHDOG: Operation timeout detected! Force clearing operationInProgress flag');
+                AppState.operationInProgress = false;
+                UI.showAlert('⚠️ Operation timed out and was reset. Please try again.', 'warning');
+            }
+        }, 5 * 60 * 1000); // 5 minutes
 
         try {
             const itemArray = items instanceof Set ? Array.from(items) : items;
@@ -333,7 +344,10 @@ const API = {
 
             return { successCount, failureCount, errors };
         } finally {
+            clearTimeout(watchdogTimer);
             AppState.operationInProgress = false;
+            const duration = Date.now() - AppState.operationStartTime;
+            console.log(`[API.executeBulkOperation] Operation completed in ${duration}ms`);
         }
     }
 };

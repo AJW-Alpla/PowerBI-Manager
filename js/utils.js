@@ -260,6 +260,25 @@ const Diagnostics = {
      */
     healthCheck() {
         return this.checkStateConsistency();
+    },
+
+    /**
+     * Force clear stuck operation flag (for debugging/recovery)
+     * Use via browser console: Diagnostics.clearStuckOperation()
+     */
+    clearStuckOperation() {
+        if (AppState.operationInProgress) {
+            console.warn('[Diagnostics] Manually clearing stuck operationInProgress flag');
+            const duration = AppState.operationStartTime ? Date.now() - AppState.operationStartTime : 'unknown';
+            console.warn(`[Diagnostics] Operation was stuck for ${duration}ms`);
+            AppState.operationInProgress = false;
+            AppState.operationStartTime = null;
+            UI.showAlert('🔧 Stuck operation cleared. You can now proceed.', 'info');
+            return true;
+        } else {
+            console.log('[Diagnostics] No stuck operation detected');
+            return false;
+        }
     }
 };
 

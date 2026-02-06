@@ -396,8 +396,15 @@ const Admin = {
      * Execute bulk add operation in admin mode
      */
     async executeBulkAdd() {
-        // Guard: Block if app is frozen
+        console.log('[executeBulkAdd] Starting, operationInProgress:', AppState.operationInProgress);
+
+        // Guard: Block if app is frozen or operation in progress
         if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('executeBulkAdd')) {
+            if (AppState.operationInProgress) {
+                UI.showAlert('⏳ Please wait for the current operation to complete', 'warning');
+            } else {
+                UI.showAlert('⚠️ Action blocked - application may be in an invalid state', 'error');
+            }
             return;
         }
 
@@ -408,9 +415,9 @@ const Admin = {
             return;
         }
 
-        // Check if operation already in progress
+        // Check if operation already in progress (redundant but explicit)
         if (AppState.operationInProgress) {
-            UI.showAlert('Please wait for the current operation to complete', 'warning');
+            UI.showAlert('⏳ Please wait for the current operation to complete', 'warning');
             return;
         }
 
@@ -451,31 +458,39 @@ const Admin = {
         this.closeBulkAddModal();
         UI.showAlert(`Adding ${summary} to workspace (Admin)...`, 'info');
 
-        // Use bulk operation handler
-        await API.executeBulkOperation({
-            items: this.bulkSelectedUsers,
-            permissionCheck: () => AppState.isPowerBIAdmin,
-            confirmMessage: null, // Already confirmed
-            buildPayload: (user) => ({
-                workspaceId: AppState.adminSelectedWorkspaceId,
-                user: user,
-                payload: {
-                    emailAddress: user.identifier,
-                    identifier: user.identifier,
-                    groupUserAccessRight: role,
-                    principalType: user.principalType
-                }
-            }),
-            apiCall: async ({ workspaceId, payload }) => {
-                return await apiCall(
-                    `${CONFIG.API.POWER_BI}/groups/${workspaceId}/users`,
-                    { method: 'POST', body: JSON.stringify(payload) }
-                );
-            },
-            successMessage: `Successfully added {count} user(s)/group(s) to workspace (Admin)`,
-            errorMessage: `Failed to add users/groups to workspace`,
-            partialMessage: `Added {success} user(s)/group(s), {failure} failed (Admin)`
-        });
+        try {
+            // Use bulk operation handler
+            await API.executeBulkOperation({
+                items: this.bulkSelectedUsers,
+                permissionCheck: () => AppState.isPowerBIAdmin,
+                confirmMessage: null, // Already confirmed
+                buildPayload: (user) => ({
+                    workspaceId: AppState.adminSelectedWorkspaceId,
+                    user: user,
+                    payload: {
+                        emailAddress: user.identifier,
+                        identifier: user.identifier,
+                        groupUserAccessRight: role,
+                        principalType: user.principalType
+                    }
+                }),
+                apiCall: async ({ workspaceId, payload }) => {
+                    return await apiCall(
+                        `${CONFIG.API.POWER_BI}/groups/${workspaceId}/users`,
+                        { method: 'POST', body: JSON.stringify(payload) }
+                    );
+                },
+                successMessage: `Successfully added {count} user(s)/group(s) to workspace (Admin)`,
+                errorMessage: `Failed to add users/groups to workspace`,
+                partialMessage: `Added {success} user(s)/group(s), {failure} failed (Admin)`
+            });
+        } catch (error) {
+            console.error('[executeBulkAdd] Error:', error);
+            UI.showAlert('❌ Failed to add users/groups', 'error');
+        } finally {
+            console.log('[executeBulkAdd] Completed');
+            this.bulkSelectedUsers = [];
+        }
     },
 
     // ============================================
