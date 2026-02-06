@@ -628,11 +628,38 @@ const ErrorHandler = {
 const Permissions = {
     /**
      * Check if current user can edit the current workspace
+     * Checks both direct role assignment AND group-based permissions
      * @returns {boolean}
      */
     canEditCurrentWorkspace() {
-        const role = AppState.currentUserRole;
-        return role === 'Admin' || role === 'Member';
+        const users = AppState.allUsers;
+        if (!users || users.length === 0) return false;
+
+        // Check if current user has a direct Admin or Member role assignment
+        const currentUser = users.find(u =>
+            u.emailAddress?.toLowerCase() === AppState.currentUserEmail?.toLowerCase()
+        );
+
+        if (currentUser) {
+            const role = currentUser.groupUserAccessRight;
+            if (role === 'Admin' || role === 'Member') {
+                return true;
+            }
+        }
+
+        // Check if there are groups with Admin/Member permissions
+        // If groups exist with these permissions, the current user likely
+        // has permissions through group membership (since they can access the workspace)
+        const adminOrMemberGroups = users.filter(u =>
+            u.principalType === 'Group' &&
+            (u.groupUserAccessRight === 'Admin' || u.groupUserAccessRight === 'Member')
+        );
+
+        if (adminOrMemberGroups.length > 0) {
+            return true;
+        }
+
+        return false;
     },
 
     /**
