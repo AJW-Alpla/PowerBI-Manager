@@ -243,6 +243,12 @@ const Auth = {
     /**
      * Check if current user has Power BI Administrator role
      * @returns {Promise<boolean>} True if user is admin
+     *
+     * NOTE: This check tests access to admin API endpoints.
+     * - If successful: User has admin role and proper token scopes → full admin access
+     * - If 401 error: User lacks admin role OR token lacks admin scopes → regular user mode
+     *
+     * The 401 error in browser console is expected for non-admin users and is handled gracefully.
      */
     async checkAdminStatus() {
         try {
@@ -253,7 +259,8 @@ const Auth = {
                 return true;
             }
         } catch (error) {
-            // Silently fail - user is not admin
+            // Expected for non-admin users or tokens without admin scopes
+            // Silently fail - treat as non-admin
         }
 
         AppState.isPowerBIAdmin = false;

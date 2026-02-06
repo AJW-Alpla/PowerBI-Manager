@@ -65,6 +65,12 @@
                     <p style="font-size: 12px; color: #666; margin-top: 8px;">
                         💡 Start typing to see matching workspaces
                     </p>
+                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
+                        <button onclick="showSecurityAudit()" class="button-primary" style="padding: 12px 24px;">
+                            🔍 Security Audit
+                        </button>
+                        <span style="margin-left: 10px; color: #666; font-size: 13px;">Export workspace permissions to Excel (scope based on your access)</span>
+                    </div>
                 </div>
                 <div id="selectedWorkspaceInfo" style="display: none; margin-top: 15px; padding: 15px; background: #e7f3ff; border-radius: 6px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -158,8 +164,62 @@
                     </tbody>
                 </table>
             </div>
+
+            <!-- Security Audit Section -->
+            <div id="workspaceSecurityAudit" style="display: none; padding: 30px; border-top: 2px solid #e0e0e0; background: #f8f9fa;">
+                <div style="max-width: 800px; margin: 0 auto;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3 style="color: #004d90; margin: 0;">🔍 Workspace Security Audit</h3>
+                        <button onclick="hideSecurityAudit()" class="button-secondary" style="padding: 8px 16px;">✕ Close</button>
+                    </div>
+                    <p style="color: #666; margin-bottom: 15px; font-size: 13px;">
+                        Export a comprehensive audit of workspace permissions to Excel or CSV
+                    </p>
+
+                    <div style="background: #e3f2fd; padding: 20px; border-radius: 6px; border-left: 4px solid #2196f3; margin-bottom: 25px;">
+                        <h4 style="color: #1565c0; margin-bottom: 10px;">📊 What will be audited:</h4>
+                        <ul style="color: #333; line-height: 1.8; margin: 0; padding-left: 20px;">
+                            <li><strong>Power BI Admins:</strong> All organizational workspaces</li>
+                            <li><strong>Regular users:</strong> Only workspaces where you have <strong>Admin or Member</strong> role (direct or via group membership)</li>
+                            <li>All workspace members (users and groups)</li>
+                            <li>User roles and permissions</li>
+                            <li>Workspace capacity information</li>
+                            <li>Principal types (User, Group, App)</li>
+                        </ul>
+                    </div>
+
+                    <div style="background: #fff3cd; padding: 15px; border-radius: 6px; border-left: 4px solid #ffc107; margin-bottom: 25px;">
+                        <p style="color: #856404; margin: 0; font-size: 13px;">
+                            ℹ️ <strong>Audit Scope:</strong> Regular users can audit workspaces where they have management permissions (Admin or Member role) - either assigned directly or through group membership. Workspaces where you're only a Contributor or Viewer (or have no access) will be excluded. Power BI Admins can audit all organizational workspaces.
+                        </p>
+                    </div>
+
+                    <div style="display: flex; gap: 15px; align-items: center;">
+                        <button onclick="runSecurityAudit()" class="button-primary" style="padding: 14px 28px; font-size: 15px;">
+                            🔍 Start Security Audit
+                        </button>
+                        <div id="auditProgress" style="display: none; flex: 1;">
+                            <div style="background: #f0f0f0; border-radius: 10px; height: 20px; overflow: hidden;">
+                                <div id="auditProgressBar" style="background: #007bff; height: 100%; width: 0%; transition: width 0.3s;"></div>
+                            </div>
+                            <div id="auditProgressText" style="margin-top: 8px; color: #666; font-size: 13px;"></div>
+                        </div>
+                    </div>
+
+                    <div id="auditResults" style="display: none; margin-top: 30px; padding: 20px; background: #d4edda; border-radius: 6px; border: 2px solid #28a745;">
+                        <h4 style="color: #155724; margin-bottom: 15px;">✅ Audit Complete!</h4>
+                        <div id="auditSummary" style="color: #333; margin-bottom: 15px;"></div>
+                        <button onclick="downloadAuditExcel()" class="button-success" style="margin-right: 10px;">
+                            📥 Download Excel
+                        </button>
+                        <button onclick="downloadAuditCSV()" class="button-secondary">
+                            📄 Download CSV
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
-        
+
         <!-- USER VIEW -->
         <div id="userView" style="display: none;">
             <div style="padding: 30px; border-bottom: 1px solid #e0e0e0;">
@@ -261,7 +321,7 @@
 
         <!-- Admin Mode Selector -->
         <div style="padding: 30px; border-bottom: 1px solid #e0e0e0;">
-            <div style="display: flex; gap: 10px;">
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <button id="adminModeWorkspaceBtn" onclick="switchAdminMode('workspace')" class="view-toggle active">
                     📁 Assign Users to Workspace
                 </button>
@@ -363,6 +423,7 @@
                 </div>
             </div>
         </div>
+
     </div>
 
     <!-- Sign In Modal -->
@@ -494,6 +555,9 @@
 
     <!-- JSZip Library for creating ZIP files -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <!-- SheetJS Library for Excel export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
     <!-- Backup Module -->
     <script src="js/backup.js"></script>

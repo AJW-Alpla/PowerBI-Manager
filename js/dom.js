@@ -60,6 +60,11 @@ const DOM = {
     adminAssignToUser: null,
     adminModeWorkspaceBtn: null,
     adminModeUserBtn: null,
+    auditProgress: null,
+    auditProgressBar: null,
+    auditProgressText: null,
+    auditResults: null,
+    auditSummary: null,
 
     // Modals & Inputs
     newUserEmail: null,
@@ -128,6 +133,11 @@ const DOM = {
         this.adminAssignToUser = document.getElementById('adminAssignToUser');
         this.adminModeWorkspaceBtn = document.getElementById('adminModeWorkspaceBtn');
         this.adminModeUserBtn = document.getElementById('adminModeUserBtn');
+        this.auditProgress = document.getElementById('auditProgress');
+        this.auditProgressBar = document.getElementById('auditProgressBar');
+        this.auditProgressText = document.getElementById('auditProgressText');
+        this.auditResults = document.getElementById('auditResults');
+        this.auditSummary = document.getElementById('auditSummary');
 
         // Modals & Inputs
         this.newUserEmail = document.getElementById('newUserEmail');

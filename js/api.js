@@ -257,7 +257,6 @@ const API = {
 
         AppState.operationInProgress = true;
         AppState.operationStartTime = Date.now();
-        console.log('[API.executeBulkOperation] Operation started');
 
         // Safety watchdog: Auto-clear stuck operations after 5 minutes
         const watchdogTimer = setTimeout(() => {
@@ -346,8 +345,6 @@ const API = {
         } finally {
             clearTimeout(watchdogTimer);
             AppState.operationInProgress = false;
-            const duration = Date.now() - AppState.operationStartTime;
-            console.log(`[API.executeBulkOperation] Operation completed in ${duration}ms`);
         }
     }
 };

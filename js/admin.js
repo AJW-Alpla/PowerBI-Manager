@@ -13,7 +13,7 @@ const Admin = {
     bulkSelectedUsers: [],
 
     /**
-     * Switch between admin modes (workspace vs user assignment)
+     * Switch between admin modes (workspace or user)
      * @param {string} mode - 'workspace' or 'user'
      */
     switchMode(mode) {
@@ -22,6 +22,28 @@ const Admin = {
         DOM.adminAssignToUser.style.display = mode === 'user' ? 'block' : 'none';
         DOM.adminModeWorkspaceBtn.classList.toggle('active', mode === 'workspace');
         DOM.adminModeUserBtn.classList.toggle('active', mode === 'user');
+    },
+
+    /**
+     * Show the security audit section in workspace view
+     */
+    showSecurityAudit() {
+        const auditSection = document.getElementById('workspaceSecurityAudit');
+        if (auditSection) {
+            auditSection.style.display = 'block';
+            // Scroll to the audit section
+            auditSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    },
+
+    /**
+     * Hide the security audit section
+     */
+    hideSecurityAudit() {
+        const auditSection = document.getElementById('workspaceSecurityAudit');
+        if (auditSection) {
+            auditSection.style.display = 'none';
+        }
     },
 
     /**
@@ -781,6 +803,321 @@ const Admin = {
             errorMessage: `Failed to add ${AppState.adminSelectedUser.principalType.toLowerCase()} to workspaces`,
             partialMessage: `Added to {success} workspace(s), {failure} failed (Admin)`
         });
+    },
+
+    // ============================================
+    // SECURITY AUDIT
+    // ============================================
+
+    auditData: [],
+
+    /**
+     * Run comprehensive security audit of workspaces
+     * - Admins: Audits all organizational workspaces
+     * - Regular users: Audits only workspaces they have access to
+     */
+    async runSecurityAudit() {
+        // Check if operation already in progress
+        if (AppState.operationInProgress) {
+            UI.showAlert('⏳ Please wait for the current operation to complete', 'warning');
+            return;
+        }
+
+        try {
+            AppState.operationInProgress = true;
+            this.auditData = [];
+
+            // Detect if user is admin or regular user
+            const isAdmin = AppState.isPowerBIAdmin;
+            const baseAPI = isAdmin ? CONFIG.API.POWER_BI_ADMIN : CONFIG.API.POWER_BI;
+            const scope = isAdmin ? 'all organizational' : 'accessible';
+
+            // Show progress UI
+            if (DOM.auditProgress) DOM.auditProgress.style.display = 'flex';
+            if (DOM.auditResults) DOM.auditResults.style.display = 'none';
+            if (DOM.auditProgressBar) DOM.auditProgressBar.style.width = '0%';
+
+            // Step 1: Load workspaces
+            this.updateAuditProgress(5, `Loading ${scope} workspaces...`);
+
+            let allWorkspaces = [];
+            // Admin: use pagination with $top. Regular user: no pagination needed (typically <1000 workspaces)
+            let nextLink = isAdmin ? `${baseAPI}/groups?$top=5000` : `${baseAPI}/groups`;
+
+            while (nextLink) {
+                const response = await apiCall(nextLink);
+
+                if (!response.ok) {
+                    const errorText = await response.text().catch(() => 'Unknown error');
+                    console.error('[runSecurityAudit] Failed to load workspaces:', response.status, errorText);
+                    throw new Error(`Failed to load workspaces: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                allWorkspaces = allWorkspaces.concat(data.value || []);
+                nextLink = data['@odata.nextLink'] || null;
+            }
+
+            // Filter out deleted/orphaned/personal workspaces
+            const workspaces = allWorkspaces.filter(w => {
+                const isDeleted = w.state === 'Deleted';
+                const isOrphaned = w.isOrphaned === true;
+                const isPersonalSPList = w.name && w.name.includes('PersonalWorkspace') && w.name.includes('SPList');
+                return !isDeleted && !isOrphaned && !isPersonalSPList;
+            });
+
+            // Calculate estimated time
+            // Admin: 20s per workspace (to comply with admin API rate limits)
+            // Regular: 500ms + 3s every 10 workspaces
+            const estimatedTimePerWorkspace = isAdmin ? 20000 : 500 + (3000 / 10); // ms
+            const estimatedTotalSeconds = Math.ceil((workspaces.length * estimatedTimePerWorkspace) / 1000);
+            const estimatedMinutes = Math.floor(estimatedTotalSeconds / 60);
+            const estimatedHours = Math.floor(estimatedMinutes / 60);
+            const displayMinutes = estimatedMinutes % 60;
+
+            let timeEstimate;
+            if (estimatedHours > 0) {
+                timeEstimate = `~${estimatedHours}h ${displayMinutes}m`;
+            } else if (estimatedMinutes > 0) {
+                timeEstimate = `~${estimatedMinutes}m`;
+            } else {
+                timeEstimate = `~${estimatedTotalSeconds}s`;
+            }
+
+            const warningMsg = isAdmin ? ' ⚠️ Admin API has strict rate limits - this will be slow!' : '';
+            this.updateAuditProgress(15, `Found ${workspaces.length} workspaces. Processing (est. ${timeEstimate})...${warningMsg}`);
+
+            // Step 2: Process each workspace
+            let processed = 0;
+            const total = workspaces.length;
+            const startTime = Date.now();
+
+            for (const workspace of workspaces) {
+                try {
+                    // Get workspace users (use appropriate API based on user role)
+                    const usersUrl = `${baseAPI}/groups/${workspace.id}/users`;
+
+                    // Retry logic for 429 errors
+                    let usersResponse;
+                    let retries = 0;
+                    const maxRetries = 2; // Reduced retries - give up faster
+
+                    while (retries <= maxRetries) {
+                        usersResponse = await apiCall(usersUrl);
+
+                        if (usersResponse.status === 429) {
+                            // Rate limited - wait much longer (default 60s minimum)
+                            const retryAfter = usersResponse.headers.get('Retry-After') || 60;
+                            const waitTime = parseInt(retryAfter) * 1000;
+                            this.updateAuditProgress(progress, `⚠️ Rate limited - cooling down ${retryAfter}s...`);
+                            await Utils.sleep(waitTime);
+                            retries++;
+                        } else {
+                            break; // Success or non-429 error
+                        }
+                    }
+
+                    if (usersResponse.ok) {
+                        const usersData = await usersResponse.json();
+                        const users = usersData.value || [];
+
+                        // Add each user to audit data
+                        for (const user of users) {
+                            this.auditData.push({
+                                workspaceId: workspace.id,
+                                workspaceName: workspace.name,
+                                capacityId: workspace.capacityId || 'N/A',
+                                userName: user.displayName || 'N/A',
+                                emailAddress: user.emailAddress || user.identifier || 'N/A',
+                                userRole: user.groupUserAccessRight || 'Unknown',
+                                userType: user.principalType || 'Unknown',
+                                identifier: user.identifier || 'N/A'
+                            });
+                        }
+                    } else if (usersResponse.status === 429) {
+                        // Still rate limited after all retries - add extra cooldown
+                        this.updateAuditProgress(progress, `⚠️ Extended cooldown - waiting 2 minutes...`);
+                        await Utils.sleep(120000); // 2 minute cooldown
+                    }
+                } catch (error) {
+                    console.error(`[runSecurityAudit] Error processing workspace ${workspace.name}:`, error);
+                }
+
+                processed++;
+                const progress = 15 + Math.round((processed / total) * 80);
+
+                // Calculate time remaining
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                const avgTimePerWorkspace = elapsed / processed;
+                const remaining = Math.ceil((total - processed) * avgTimePerWorkspace);
+                const remainingMin = Math.floor(remaining / 60);
+                const remainingSec = remaining % 60;
+                const timeRemaining = remainingMin > 0
+                    ? `${remainingMin}m ${remainingSec}s remaining`
+                    : `${remainingSec}s remaining`;
+
+                this.updateAuditProgress(progress, `Processing ${processed}/${total} workspaces (${timeRemaining})...`);
+
+                // Rate limiting: Admin API has VERY strict limits (~200 requests/hour = ~3/min)
+                if (isAdmin) {
+                    // Admin mode: EXTREMELY conservative - 1 request every 20 seconds
+                    // This matches Microsoft's admin API limits of ~3 requests per minute
+                    await Utils.sleep(20000); // 20 seconds between each request
+                } else {
+                    // Regular user mode: 2 requests/second + 3s pause every 10 workspaces
+                    await Utils.sleep(500);
+                    if (processed % 10 === 0) {
+                        await Utils.sleep(3000);
+                    }
+                }
+            }
+
+            this.updateAuditProgress(100, 'Audit complete!');
+
+            // Show results
+            setTimeout(() => {
+                if (DOM.auditProgress) DOM.auditProgress.style.display = 'none';
+                if (DOM.auditResults) DOM.auditResults.style.display = 'block';
+                if (DOM.auditSummary) {
+                    const summaryHTML = `
+                        <div style="line-height: 1.8;">
+                            <strong>📊 Summary:</strong><br>
+                            • Workspaces processed: ${workspaces.length}<br>
+                            • Total user/group entries: ${this.auditData.length}<br>
+                            • Timestamp: ${new Date().toLocaleString()}
+                        </div>
+                    `;
+
+                    if (this.auditData.length === 0 && workspaces.length === 0) {
+                        DOM.auditSummary.innerHTML = summaryHTML + `
+                            <div style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 4px; border-left: 4px solid #ffc107;">
+                                <strong>⚠️ No workspaces found.</strong><br>
+                                Check the browser console (F12) for error messages.
+                            </div>
+                        `;
+                    } else if (this.auditData.length === 0) {
+                        DOM.auditSummary.innerHTML = summaryHTML + `
+                            <div style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 4px; border-left: 4px solid #ffc107;">
+                                <strong>⚠️ No audit data collected.</strong><br>
+                                All workspaces appear to be empty or inaccessible.
+                                Check the browser console (F12) for error messages.
+                            </div>
+                        `;
+                    } else {
+                        DOM.auditSummary.innerHTML = summaryHTML;
+                    }
+                }
+
+                const message = this.auditData.length > 0
+                    ? `✅ Security audit complete! Found ${this.auditData.length} user entries across ${workspaces.length} workspaces`
+                    : `⚠️ Audit complete but no data found. Check console for details.`;
+                UI.showAlert(message, this.auditData.length > 0 ? 'success' : 'warning');
+            }, 500);
+
+        } catch (error) {
+            console.error('[runSecurityAudit] Error:', error);
+            UI.showAlert(`❌ Security audit failed: ${error.message}`, 'error');
+            if (DOM.auditProgress) DOM.auditProgress.style.display = 'none';
+        } finally {
+            AppState.operationInProgress = false;
+        }
+    },
+
+    /**
+     * Update audit progress bar
+     */
+    updateAuditProgress(percent, message) {
+        if (DOM.auditProgressBar) {
+            DOM.auditProgressBar.style.width = `${percent}%`;
+        }
+        if (DOM.auditProgressText) {
+            DOM.auditProgressText.textContent = message;
+        }
+    },
+
+    /**
+     * Download audit data as CSV
+     */
+    downloadAuditCSV() {
+        if (!this.auditData || this.auditData.length === 0) {
+            UI.showAlert('No audit data to download', 'warning');
+            return;
+        }
+
+        try {
+            // CSV header
+            const headers = ['Workspace ID', 'Workspace Name', 'Capacity ID', 'User Name', 'Email Address', 'Role', 'User Type', 'Identifier'];
+            const csvRows = [headers.join(',')];
+
+            // CSV data rows
+            for (const row of this.auditData) {
+                const values = [
+                    `"${(row.workspaceId || '').replace(/"/g, '""')}"`,
+                    `"${(row.workspaceName || '').replace(/"/g, '""')}"`,
+                    `"${(row.capacityId || '').replace(/"/g, '""')}"`,
+                    `"${(row.userName || '').replace(/"/g, '""')}"`,
+                    `"${(row.emailAddress || '').replace(/"/g, '""')}"`,
+                    `"${(row.userRole || '').replace(/"/g, '""')}"`,
+                    `"${(row.userType || '').replace(/"/g, '""')}"`,
+                    `"${(row.identifier || '').replace(/"/g, '""')}"`
+                ];
+                csvRows.push(values.join(','));
+            }
+
+            const csvContent = csvRows.join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+            const filename = `PowerBI_Security_Audit_${timestamp}.csv`;
+
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+
+            UI.showAlert(`✅ CSV downloaded: ${filename}`, 'success');
+        } catch (error) {
+            console.error('[downloadAuditCSV] Error:', error);
+            UI.showAlert('❌ Failed to download CSV', 'error');
+        }
+    },
+
+    /**
+     * Download audit data as Excel (using XLSX library if available)
+     */
+    async downloadAuditExcel() {
+        if (!this.auditData || this.auditData.length === 0) {
+            UI.showAlert('No audit data to download', 'warning');
+            return;
+        }
+
+        // Check if SheetJS library is available
+        if (typeof XLSX === 'undefined') {
+            UI.showAlert('Excel export library not loaded. Downloading as CSV instead...', 'info');
+            this.downloadAuditCSV();
+            return;
+        }
+
+        try {
+            // Create worksheet
+            const ws = XLSX.utils.json_to_sheet(this.auditData);
+
+            // Create workbook
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Security Audit');
+
+            // Generate filename
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+            const filename = `PowerBI_Security_Audit_${timestamp}.xlsx`;
+
+            // Download
+            XLSX.writeFile(wb, filename);
+
+            UI.showAlert(`✅ Excel downloaded: ${filename}`, 'success');
+        } catch (error) {
+            console.error('[downloadAuditExcel] Error:', error);
+            UI.showAlert('Excel export failed. Downloading as CSV instead...', 'warning');
+            this.downloadAuditCSV();
+        }
     }
 };
 
@@ -867,6 +1204,26 @@ function closeAdminBulkWorkspaceModal() {
 
 function executeAdminBulkWorkspaceAssignment() {
     return Admin.executeBulkWorkspaceAssignment();
+}
+
+function runSecurityAudit() {
+    return Admin.runSecurityAudit();
+}
+
+function downloadAuditExcel() {
+    return Admin.downloadAuditExcel();
+}
+
+function downloadAuditCSV() {
+    return Admin.downloadAuditCSV();
+}
+
+function showSecurityAudit() {
+    return Admin.showSecurityAudit();
+}
+
+function hideSecurityAudit() {
+    return Admin.hideSecurityAudit();
 }
 
 // Admin module loaded

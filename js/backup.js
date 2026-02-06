@@ -940,4 +940,3 @@ function showBackupModal() {
 }
 
 // Backup module loaded
-console.log('[Backup] Module loaded');
