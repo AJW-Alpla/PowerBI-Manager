@@ -40,7 +40,9 @@ const Backup = {
                 'blank.pbix',
                 './blank.pbix',
                 '../blank.pbix',
-                'https://github.com/JamesDBartlett3/ps-for-pbi/raw/main/.bin/blank.pbix'
+                // Try multiple GitHub URLs as fallback (from your repository)
+                'https://raw.githubusercontent.com/AJW-Alpla/PowerBI-Manager/main/blank.pbix',
+                'https://github.com/AJW-Alpla/PowerBI-Manager/raw/main/blank.pbix'
             ];
 
             let response = null;
@@ -139,6 +141,15 @@ const Backup = {
                                     <input type="checkbox" id="backup_use_clone" checked>
                                     <span style="font-size: 13px;">Use clone fallback for restricted reports</span>
                                 </label>
+                            </div>
+                        </div>
+
+                        <div style="padding: 12px; background: #e7f3ff; border-left: 4px solid #0078d4; border-radius: 4px; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #004085;">
+                                <strong>ℹ️ Browser Security Note:</strong><br>
+                                Your browser may warn that the downloaded ZIP file is "potentially harmful." This is a false positive.
+                                The backup contains only your Power BI files (.pbix and .json) and is completely safe.
+                                If warned, click "Keep" to retain the download.
                             </div>
                         </div>
 
@@ -521,10 +532,11 @@ const Backup = {
             const fileName = `PowerBI_Backup_${this.getSafeFileName(workspaceName)}_${timestamp}.zip`;
 
             this.log(`✓ Backup complete! Downloading ${fileName}`, 'success');
+            this.log('⚠️ Note: Your browser may warn about this file being "potentially harmful" - this is a false positive. The file is safe.', 'warning');
             this.downloadBlob(zipBlob, fileName);
 
-            // Show success message
-            UI.showAlert(`✓ Backup completed successfully! Downloaded: ${fileName}`, 'success');
+            // Show success message with download warning
+            UI.showAlert(`✓ Backup completed! If your browser warns about the download, click "Keep" - the file is safe.`, 'success');
 
             // Close modal after a delay
             setTimeout(() => {
