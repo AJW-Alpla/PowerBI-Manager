@@ -78,6 +78,9 @@
                             <button onclick="refreshCurrentWorkspace()" class="button-primary" title="Refresh workspace users (F5)">
                                 🔄 Refresh
                             </button>
+                            <button onclick="showBackupModal()" class="button-success" title="Backup workspace reports and datasets">
+                                📦 Backup Workspace
+                            </button>
                             <button onclick="clearWorkspaceSelection()" class="button-secondary">Change Workspace</button>
                         </div>
                     </div>
@@ -488,6 +491,12 @@
     <script src="js/user.js"></script>
     <script src="js/admin.js"></script>
     <script src="js/app.js"></script>
+
+    <!-- JSZip Library for creating ZIP files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <!-- Backup Module -->
+    <script src="js/backup.js"></script>
 
     <script>
         // Legacy placeholder - all functionality moved to external modules
