@@ -436,6 +436,8 @@ const Backup = {
 
                         // Only for Import/Composite datasets
                         const datasetType = dataset.targetStorageMode || dataset.type;
+                        this.log(`  Dataset type: ${datasetType}`, 'info');
+
                         if (datasetType === 'Import' || datasetType === 'Composite') {
                             try {
                                 const scheduleResponse = await apiCall(
@@ -445,8 +447,10 @@ const Backup = {
                                 schedulesFolder.file(`${safeName}-refresh-schedule.json`, JSON.stringify(schedule, null, 2));
                                 this.log(`  ✓ Refresh schedule exported: ${dataset.name}`, 'success');
                             } catch (error) {
-                                this.log(`  ⚠ No refresh schedule available: ${dataset.name}`, 'warning');
+                                this.log(`  ⚠ No refresh schedule configured for: ${dataset.name}`, 'warning');
                             }
+                        } else {
+                            this.log(`  ⚠ Skipping refresh schedule (not Import/Composite): ${dataset.name}`, 'warning');
                         }
                     }
 
@@ -466,6 +470,12 @@ const Backup = {
                         !d.name.startsWith(this.CLONE_TAG) &&
                         !d.name.startsWith(this.THIN_MODEL_TAG)
                     );
+
+                    this.log(`Found ${datasetsWithoutReports.length} dataset(s) without reports for thin model export`, 'info');
+
+                    if (datasetsWithoutReports.length === 0) {
+                        this.log('ℹ️ All datasets have reports - no thin models needed', 'info');
+                    }
 
                     for (let i = 0; i < datasetsWithoutReports.length; i++) {
                     const dataset = datasetsWithoutReports[i];
@@ -585,10 +595,41 @@ const Backup = {
             }
 
             const uploadData = await uploadResponse.json();
-            tempReportId = uploadData.reports?.[0]?.id;
+            this.log(`Upload response: ${JSON.stringify(uploadData)}`, 'info');
+
+            // The import is asynchronous, we need to get the import ID and poll for status
+            const importId = uploadData.id;
+            if (!importId) {
+                throw new Error('Failed to get import ID from response');
+            }
+
+            // Wait for import to complete
+            this.log(`Waiting for import to complete (ID: ${importId})...`, 'info');
+            await Utils.sleep(5000);
+
+            // Get the import status to find the report and dataset IDs
+            const statusResponse = await fetch(
+                `${CONFIG.API.POWER_BI}/groups/${AppState.currentWorkspaceId}/imports/${importId}`,
+                {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${AppState.accessToken}`
+                    }
+                }
+            );
+
+            if (!statusResponse.ok) {
+                throw new Error('Failed to get import status');
+            }
+
+            const importStatus = await statusResponse.json();
+            this.log(`Import status: ${JSON.stringify(importStatus)}`, 'info');
+
+            tempReportId = importStatus.reports?.[0]?.id;
+            tempDatasetId = importStatus.datasets?.[0]?.id;
 
             if (!tempReportId) {
-                throw new Error('Failed to get temporary report ID');
+                throw new Error('Failed to get temporary report ID from import status');
             }
 
             // Wait for materialization
@@ -670,11 +711,41 @@ const Backup = {
             }
 
             const uploadData = await uploadResponse.json();
-            tempReportId = uploadData.reports?.[0]?.id;
-            tempDatasetId = uploadData.datasets?.[0]?.id;
+            this.log(`Upload response: ${JSON.stringify(uploadData)}`, 'info');
+
+            // The import is asynchronous, get import ID and poll
+            const importId = uploadData.id;
+            if (!importId) {
+                throw new Error('Failed to get import ID from response');
+            }
+
+            // Wait for import to complete
+            this.log(`Waiting for import to complete (ID: ${importId})...`, 'info');
+            await Utils.sleep(5000);
+
+            // Get the import status
+            const statusResponse = await fetch(
+                `${CONFIG.API.POWER_BI}/groups/${AppState.currentWorkspaceId}/imports/${importId}`,
+                {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${AppState.accessToken}`
+                    }
+                }
+            );
+
+            if (!statusResponse.ok) {
+                throw new Error('Failed to get import status');
+            }
+
+            const importStatus = await statusResponse.json();
+            this.log(`Import status: ${JSON.stringify(importStatus)}`, 'info');
+
+            tempReportId = importStatus.reports?.[0]?.id;
+            tempDatasetId = importStatus.datasets?.[0]?.id;
 
             if (!tempReportId) {
-                throw new Error('Failed to get temporary report ID');
+                throw new Error('Failed to get temporary report ID from import status');
             }
 
             // Wait for materialization
