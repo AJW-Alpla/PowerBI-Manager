@@ -415,10 +415,27 @@ const Admin = {
         }
 
         const role = document.getElementById('adminBulkRole').value;
+        const userInput = document.getElementById('adminBulkUserSearch');
 
+        // BUGFIX: Handle manual entry for non-cached users
         if (this.bulkSelectedUsers.length === 0) {
-            UI.showAlert('Select at least one user/group', 'error');
-            return;
+            // Check if user typed something in the input field
+            const manualEntry = userInput?.value.trim();
+            if (manualEntry) {
+                // Determine type based on format
+                const isEmail = manualEntry.includes('@');
+                const principalType = isEmail ? 'User' : 'Group';
+
+                // Add to selection list for processing
+                this.bulkSelectedUsers.push({
+                    identifier: manualEntry,
+                    displayName: isEmail ? manualEntry.split('@')[0] : manualEntry,
+                    principalType: principalType
+                });
+            } else {
+                UI.showAlert('Enter an email/identifier or select at least one user/group', 'error');
+                return;
+            }
         }
 
         const userCount = this.bulkSelectedUsers.filter(u => u.principalType === 'User').length;

@@ -759,6 +759,7 @@ const Workspace = {
         }
 
         const roleSelect = document.getElementById('addUserRoleSelect');
+        const emailInput = document.getElementById('addUserEmailInput');
 
         if (!roleSelect) {
             UI.showAlert('Modal not ready. Please try again.', 'error');
@@ -767,9 +768,35 @@ const Workspace = {
 
         const role = roleSelect.value;
 
+        // BUGFIX: Handle manual entry for non-cached users
         if (this.selectedUsersForAdd.length === 0) {
-            UI.showAlert('Select at least one user/group', 'error');
-            return;
+            // Check if user typed something in the input field
+            const manualEntry = emailInput?.value.trim();
+            if (manualEntry) {
+                // Determine type based on format
+                const isEmail = manualEntry.includes('@');
+                const principalType = isEmail ? 'User' : 'Group';
+
+                // Check if user already exists in workspace
+                const existingUser = AppState.allUsers.find(u =>
+                    u.identifier === manualEntry ||
+                    u.emailAddress?.toLowerCase() === manualEntry.toLowerCase()
+                );
+                if (existingUser) {
+                    UI.showAlert(`${manualEntry} already has ${existingUser.groupUserAccessRight} role in this workspace`, 'warning');
+                    return;
+                }
+
+                // Add to selection list for processing
+                this.selectedUsersForAdd.push({
+                    identifier: manualEntry,
+                    displayName: isEmail ? manualEntry.split('@')[0] : manualEntry,
+                    principalType: principalType
+                });
+            } else {
+                UI.showAlert('Enter an email/identifier or select at least one user/group', 'error');
+                return;
+            }
         }
 
         const userCount = this.selectedUsersForAdd.filter(u => u.principalType === 'User').length;

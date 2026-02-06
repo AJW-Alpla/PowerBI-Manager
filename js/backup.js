@@ -290,6 +290,9 @@ const Backup = {
 
             this.log(`Starting backup for workspace: ${workspaceName}`, 'info');
 
+            // Cleanup orphaned resources from previous failed runs
+            await this.cleanupOrphanedResources();
+
             // Initialize JSZip
             const zip = new JSZip();
 
@@ -380,8 +383,9 @@ const Backup = {
                             try {
                                 const cloneBlob = await this.exportClonedReport(report.id, report.name);
                                 if (cloneBlob) {
-                                    cloneReportsFolder.file(`${safeName}-Clone.pbix`, cloneBlob);
-                                    this.log(`  ✓ Clone export successful: ${report.name}`, 'success');
+                                    const cloneFileName = `${safeName}-Clone.pbix`;
+                                    cloneReportsFolder.file(cloneFileName, cloneBlob);
+                                    this.log(`  ✓ Clone export successful: ${cloneFileName}`, 'success');
                                 }
                             } catch (cloneError) {
                                 this.log(`  ✗ Clone export failed: ${cloneError.message}`, 'error');
@@ -570,6 +574,9 @@ const Backup = {
         const cloneName = `${this.CLONE_TAG}${Date.now()}`;
         let tempReportId = null;
         let tempDatasetId = null;
+
+        this.log(`    Creating temporary clone: ${cloneName}`, 'info');
+        this.log(`    Final file will be named: ${this.getSafeFileName(reportName)}-Clone.pbix`, 'info');
 
         try {
             // Create FormData for multipart upload
@@ -788,25 +795,120 @@ const Backup = {
     },
 
     /**
+     * Cleanup sweep for orphaned temporary resources from previous failed runs
+     */
+    async cleanupOrphanedResources() {
+        this.log('=== CLEANUP SWEEP ===', 'info');
+        this.log('Checking for orphaned temporary resources from previous runs...', 'info');
+
+        try {
+            // Fetch all reports
+            const reportsResponse = await apiCall(`${CONFIG.API.POWER_BI}/groups/${AppState.currentWorkspaceId}/reports`);
+            const reports = await reportsResponse.json().then(d => d.value || []);
+
+            // Fetch all datasets
+            const datasetsResponse = await apiCall(`${CONFIG.API.POWER_BI}/groups/${AppState.currentWorkspaceId}/datasets`);
+            const datasets = await datasetsResponse.json().then(d => d.value || []);
+
+            // Find orphaned reports
+            const orphanReports = reports.filter(r =>
+                r.name.startsWith(this.CLONE_TAG) || r.name.startsWith(this.THIN_MODEL_TAG)
+            );
+
+            // Find orphaned datasets
+            const orphanDatasets = datasets.filter(d =>
+                d.name.startsWith(this.CLONE_TAG) || d.name.startsWith(this.THIN_MODEL_TAG)
+            );
+
+            const totalOrphans = orphanReports.length + orphanDatasets.length;
+
+            if (totalOrphans === 0) {
+                this.log('✓ No orphaned resources found - workspace is clean', 'success');
+                return;
+            }
+
+            this.log(`Found ${orphanReports.length} orphan report(s) and ${orphanDatasets.length} orphan dataset(s) to clean up`, 'warning');
+
+            // Clean up orphan reports
+            for (const report of orphanReports) {
+                this.log(`  Deleting orphan report: ${report.name}`, 'info');
+                try {
+                    const deleteResponse = await apiCall(
+                        `${CONFIG.API.POWER_BI}/groups/${AppState.currentWorkspaceId}/reports/${report.id}`,
+                        { method: 'DELETE' }
+                    );
+                    if (deleteResponse.ok) {
+                        this.log(`  ✓ Deleted orphan report: ${report.name}`, 'success');
+                    } else {
+                        this.log(`  ⚠ Failed to delete orphan report: ${report.name}`, 'warning');
+                    }
+                } catch (error) {
+                    this.log(`  ⚠ Error deleting orphan report ${report.name}: ${error.message}`, 'warning');
+                }
+                await Utils.sleep(200); // Rate limiting
+            }
+
+            // Clean up orphan datasets
+            for (const dataset of orphanDatasets) {
+                this.log(`  Deleting orphan dataset: ${dataset.name}`, 'info');
+                try {
+                    const deleteResponse = await apiCall(
+                        `${CONFIG.API.POWER_BI}/groups/${AppState.currentWorkspaceId}/datasets/${dataset.id}`,
+                        { method: 'DELETE' }
+                    );
+                    if (deleteResponse.ok) {
+                        this.log(`  ✓ Deleted orphan dataset: ${dataset.name}`, 'success');
+                    } else {
+                        this.log(`  ⚠ Failed to delete orphan dataset: ${dataset.name}`, 'warning');
+                    }
+                } catch (error) {
+                    this.log(`  ⚠ Error deleting orphan dataset ${dataset.name}: ${error.message}`, 'warning');
+                }
+                await Utils.sleep(200); // Rate limiting
+            }
+
+            this.log(`✓ Cleanup sweep completed - removed ${totalOrphans} orphaned resource(s)`, 'success');
+
+        } catch (error) {
+            this.log(`⚠ Cleanup sweep failed (non-critical): ${error.message}`, 'warning');
+            // Don't fail the backup if cleanup fails - it's non-critical
+        }
+    },
+
+    /**
      * Cleanup temporary resources
      */
     async cleanupTempResources(reportId, datasetId) {
         try {
             if (reportId) {
-                await apiCall(
+                this.log(`  🧹 Cleaning up temporary report: ${reportId}`, 'info');
+                const deleteResponse = await apiCall(
                     `${CONFIG.API.POWER_BI}/groups/${AppState.currentWorkspaceId}/reports/${reportId}`,
                     { method: 'DELETE' }
-                ).catch(() => {});
+                ).catch((err) => {
+                    this.log(`  ⚠ Failed to delete temp report: ${err.message}`, 'warning');
+                    return null;
+                });
+                if (deleteResponse && deleteResponse.ok) {
+                    this.log(`  ✓ Temporary report deleted`, 'success');
+                }
             }
 
             if (datasetId) {
-                await apiCall(
+                this.log(`  🧹 Cleaning up temporary dataset: ${datasetId}`, 'info');
+                const deleteResponse = await apiCall(
                     `${CONFIG.API.POWER_BI}/groups/${AppState.currentWorkspaceId}/datasets/${datasetId}`,
                     { method: 'DELETE' }
-                ).catch(() => {});
+                ).catch((err) => {
+                    this.log(`  ⚠ Failed to delete temp dataset: ${err.message}`, 'warning');
+                    return null;
+                });
+                if (deleteResponse && deleteResponse.ok) {
+                    this.log(`  ✓ Temporary dataset deleted`, 'success');
+                }
             }
         } catch (error) {
-            // Ignore cleanup errors
+            this.log(`  ⚠ Cleanup error (non-critical): ${error.message}`, 'warning');
         }
     },
 
