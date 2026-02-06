@@ -230,6 +230,7 @@ const Admin = {
             <div class="modal-content" style="max-width: 700px;">
                 <div class="modal-header">
                     <h2>➕ Add Users/Groups to ${Utils.escapeHtml(workspaceName)}</h2>
+                    <button type="button" onclick="closeAdminBulkAddModal()" class="close-btn">&times;</button>
                 </div>
                 <div class="modal-body">
                     <div style="padding: 15px; background: #fff3cd; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #ffc107;">
@@ -395,6 +396,24 @@ const Admin = {
      * Execute bulk add operation in admin mode
      */
     async executeBulkAdd() {
+        // Guard: Block if app is frozen
+        if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('executeBulkAdd')) {
+            return;
+        }
+
+        // Preflight check: token validity for bulk operation
+        const tokenCheck = Permissions.checkTokenValidity(5);
+        if (!tokenCheck.valid) {
+            UI.showAlert(tokenCheck.message, 'error');
+            return;
+        }
+
+        // Check if operation already in progress
+        if (AppState.operationInProgress) {
+            UI.showAlert('Please wait for the current operation to complete', 'warning');
+            return;
+        }
+
         const role = document.getElementById('adminBulkRole').value;
 
         if (this.bulkSelectedUsers.length === 0) {
@@ -413,6 +432,7 @@ const Admin = {
         }
 
         this.closeBulkAddModal();
+        UI.showAlert(`Adding ${summary} to workspace (Admin)...`, 'info');
 
         // Use bulk operation handler
         await API.executeBulkOperation({
@@ -560,6 +580,7 @@ const Admin = {
             <div class="modal-content" style="max-width: 700px;">
                 <div class="modal-header" style="background: #ffc107; color: #000;">
                     <h2>➕ Add to Multiple Workspaces (Admin Mode)</h2>
+                    <button type="button" onclick="closeAdminBulkWorkspaceModal()" class="close-btn" style="color: #000;">&times;</button>
                 </div>
                 <div class="modal-body">
                     <div style="padding: 15px; background: #d4edda; border-radius: 6px; margin-bottom: 20px; border: 2px solid #28a745;">
@@ -670,6 +691,24 @@ const Admin = {
      * Execute bulk workspace assignment
      */
     async executeBulkWorkspaceAssignment() {
+        // Guard: Block if app is frozen
+        if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('executeBulkWorkspaceAssignment')) {
+            return;
+        }
+
+        // Preflight check: token validity for bulk operation
+        const tokenCheck = Permissions.checkTokenValidity(5);
+        if (!tokenCheck.valid) {
+            UI.showAlert(tokenCheck.message, 'error');
+            return;
+        }
+
+        // Check if operation already in progress
+        if (AppState.operationInProgress) {
+            UI.showAlert('Please wait for the current operation to complete', 'warning');
+            return;
+        }
+
         const modal = document.getElementById('adminBulkWorkspaceModal');
         if (!modal) return;
 
@@ -687,6 +726,7 @@ const Admin = {
         }
 
         this.closeBulkWorkspaceModal();
+        UI.showAlert(`Adding to ${selectedWorkspaceIds.length} workspace(s) (Admin)...`, 'info');
 
         // Use bulk operation handler
         await API.executeBulkOperation({
@@ -800,4 +840,4 @@ function executeAdminBulkWorkspaceAssignment() {
     return Admin.executeBulkWorkspaceAssignment();
 }
 
-console.log('✓ Admin module loaded');
+// Admin module loaded

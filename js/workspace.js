@@ -33,12 +33,17 @@ const Workspace = {
      * @param {object} workspace - Workspace object
      */
     async selectWorkspace(workspace) {
+        // Guard: Block if app is frozen
+        if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('selectWorkspace')) {
+            return;
+        }
+
         AppState.currentWorkspaceId = workspace.id;
-        DOM.workspaceSearch.value = '';
-        DOM.selectedWorkspaceInfo.style.display = 'block';
-        DOM.selectedWorkspaceName.textContent = workspace.name;
-        DOM.workspaceInfo.textContent = workspace.name;
-        DOM.addUserBtn.style.display = 'block';
+        if (DOM.workspaceSearch) DOM.workspaceSearch.value = '';
+        if (DOM.selectedWorkspaceInfo) DOM.selectedWorkspaceInfo.style.display = 'block';
+        if (DOM.selectedWorkspaceName) DOM.selectedWorkspaceName.textContent = workspace.name;
+        if (DOM.workspaceInfo) DOM.workspaceInfo.textContent = workspace.name;
+        if (DOM.addUserBtn) DOM.addUserBtn.style.display = 'block';
 
         UI.showAlert('Loading users...', 'info');
         await this.loadWorkspaceUsers();
@@ -333,15 +338,27 @@ const Workspace = {
      * Apply pending role changes
      */
     async applyPendingRoleChanges() {
-        // Check permission first
-        if (!this.canEditWorkspace()) {
-            UI.showAlert('You need Admin or Member role to apply changes', 'error');
+        // Guard: Block if app is frozen
+        if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('applyPendingRoleChanges')) {
             return;
         }
 
         if (AppState.pendingRoleChanges.size === 0) return;
 
+        // Preflight check: permissions + token validity for bulk operation
+        const preflight = Permissions.preflightCheck({ requireEdit: true, minTokenMinutes: 3 });
+        if (!preflight.allowed) {
+            UI.showAlert(preflight.message, 'error');
+            return;
+        }
+
         if (!confirm(`Apply ${AppState.pendingRoleChanges.size} role change(s)?`)) return;
+
+        // Set loading state
+        const applyBtn = document.querySelector('[onclick*="applyPendingRoleChanges"]');
+        UI.setButtonLoading(applyBtn, true);
+        AppState.operationInProgress = true;
+        AppState.currentUIState = UIState.LOADING;
 
         // Build payloads using O(1) Map lookup
         const payloads = [];
@@ -362,58 +379,65 @@ const Workspace = {
         let successCount = 0;
         let failureCount = 0;
 
-        for (let i = 0; i < payloads.length; i += CONFIG.BATCH_SIZE) {
-            const batch = payloads.slice(i, i + CONFIG.BATCH_SIZE);
-            const batchIdentifiers = identifiersToRoles.slice(i, i + CONFIG.BATCH_SIZE);
-            const results = await Promise.allSettled(
-                batch.map(payload =>
-                    apiCall(
-                        `${CONFIG.API.POWER_BI}/groups/${AppState.currentWorkspaceId}/users`,
-                        { method: 'PUT', body: JSON.stringify(payload) }
+        try {
+            for (let i = 0; i < payloads.length; i += CONFIG.BATCH_SIZE) {
+                const batch = payloads.slice(i, i + CONFIG.BATCH_SIZE);
+                const batchIdentifiers = identifiersToRoles.slice(i, i + CONFIG.BATCH_SIZE);
+                const results = await Promise.allSettled(
+                    batch.map(payload =>
+                        apiCall(
+                            `${CONFIG.API.POWER_BI}/groups/${AppState.currentWorkspaceId}/users`,
+                            { method: 'PUT', body: JSON.stringify(payload) }
+                        )
                     )
-                )
-            );
+                );
 
-            // Collect successes and failures
-            results.forEach((result, idx) => {
-                if (result.status === 'fulfilled' && result.value.ok) {
-                    successCount++;
-                    // Update cache in-memory
-                    const { identifier, newRole } = batchIdentifiers[idx];
-                    Cache.updateUserInCache(AppState.currentWorkspaceId, identifier, {
-                        groupUserAccessRight: newRole
-                    });
-                } else {
-                    failureCount++;
+                // Collect successes and failures
+                results.forEach((result, idx) => {
+                    if (result.status === 'fulfilled' && result.value.ok) {
+                        successCount++;
+                        // Update cache in-memory
+                        const { identifier, newRole } = batchIdentifiers[idx];
+                        Cache.updateUserInCache(AppState.currentWorkspaceId, identifier, {
+                            groupUserAccessRight: newRole
+                        });
+                    } else {
+                        failureCount++;
+                    }
+                });
+
+                if (i + CONFIG.BATCH_SIZE < payloads.length) {
+                    await Utils.sleep(CONFIG.RATE_LIMIT_DELAY);
                 }
-            });
-
-            if (i + CONFIG.BATCH_SIZE < payloads.length) {
-                await Utils.sleep(CONFIG.RATE_LIMIT_DELAY);
             }
-        }
 
-        AppState.pendingRoleChanges.clear();
-        this.updatePendingChangesUI();
+            AppState.pendingRoleChanges.clear();
+            this.updatePendingChangesUI();
 
-        // Show comprehensive feedback
-        if (failureCount === 0) {
-            UI.showAlert(`✓ Successfully applied ${successCount} change(s)`, 'success');
-        } else if (successCount === 0) {
-            UI.showAlert(`✗ Failed to apply changes`, 'error');
-        } else {
-            UI.showAlert(`⚠ Partially completed: ${successCount} applied, ${failureCount} failed`, 'error');
-        }
+            // Show comprehensive feedback
+            if (failureCount === 0) {
+                UI.showAlert(`✓ Successfully applied ${successCount} change(s)`, 'success');
+            } else if (successCount === 0) {
+                UI.showAlert(`✗ Failed to apply changes`, 'error');
+            } else {
+                UI.showAlert(`⚠ Partially completed: ${successCount} applied, ${failureCount} failed`, 'warning');
+            }
 
-        // Re-render with updated cache
-        this.buildUserIndex();
-        this.renderUsers();
+            // Re-render with updated cache
+            this.buildUserIndex();
+            this.renderUsers();
 
-        // Update TTL and mark for verification
-        if (successCount > 0) {
-            AppState.workspaceCacheTTL.set(AppState.currentWorkspaceId, Date.now() + CONFIG.CACHE_TTL);
-            Cache.markWorkspaceDirty(AppState.currentWorkspaceId);
-            Cache.requestDebouncedRefresh();
+            // Update TTL and mark for verification
+            if (successCount > 0) {
+                AppState.workspaceCacheTTL.set(AppState.currentWorkspaceId, Date.now() + CONFIG.CACHE_TTL);
+                Cache.markWorkspaceDirty(AppState.currentWorkspaceId);
+                Cache.requestDebouncedRefresh();
+            }
+        } finally {
+            // CRITICAL: Always reset loading state
+            UI.setButtonLoading(applyBtn, false);
+            AppState.operationInProgress = false;
+            AppState.currentUIState = UIState.READY;
         }
     },
 
@@ -618,28 +642,25 @@ const Workspace = {
     },
 
     /**
-     * Select user from autocomplete suggestion
-     */
-    selectUserSuggestion(email, displayName, principalType) {
-        const input = document.getElementById('addUserEmailInput');
-        const typeSelect = document.getElementById('addUserPrincipalType');
-        const dropdown = document.getElementById('addUserSuggestionsDropdown');
-
-        input.value = email;
-        typeSelect.value = principalType || 'User';
-        dropdown.style.display = 'none';
-    },
-
-    /**
      * Add user to selected list for bulk add
      * @param {string} identifier - User identifier
      * @param {string} displayName - Display name
      * @param {string} principalType - Principal type
      */
     addUserToSelectedList(identifier, displayName, principalType) {
-        // Check if already added
+        // Check if already added to selection list
         if (this.selectedUsersForAdd.some(u => u.identifier === identifier)) {
-            UI.showAlert('User/group already added', 'info');
+            UI.showAlert('User/group already in selection list', 'info');
+            return;
+        }
+
+        // Check if user already exists in workspace
+        const existingUser = AppState.allUsers.find(u =>
+            u.identifier === identifier ||
+            u.emailAddress?.toLowerCase() === identifier.toLowerCase()
+        );
+        if (existingUser) {
+            UI.showAlert(`${displayName} already has ${existingUser.groupUserAccessRight} role in this workspace`, 'warning');
             return;
         }
 
@@ -690,12 +711,18 @@ const Workspace = {
                         ${user.principalType === 'Group' ? '<span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-left: 5px;">GROUP</span>' : ''}
                     </div>
                 </div>
-                <button onclick="Workspace.removeUserFromSelectedList('${Utils.escapeHtml(user.identifier)}')"
-                        type="button"
-                        class="button-secondary"
+                <button type="button" class="button-secondary remove-selected-user"
+                        data-identifier="${Utils.escapeHtml(user.identifier)}"
                         style="padding: 5px 10px; font-size: 12px;">Remove</button>
             </div>
         `).join('');
+
+        // Add click handlers for remove buttons
+        listContainer.querySelectorAll('.remove-selected-user').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.removeUserFromSelectedList(btn.dataset.identifier);
+            });
+        });
     },
 
     /**
@@ -719,10 +746,22 @@ const Workspace = {
      * Execute add user to workspace
      */
     async executeAddUser() {
+        // Guard: Block if app is frozen
+        if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('executeAddUser')) {
+            return;
+        }
+
+        // Preflight check: permissions + token validity
+        const preflight = Permissions.preflightCheck({ requireEdit: true, minTokenMinutes: 3 });
+        if (!preflight.allowed) {
+            UI.showAlert(preflight.message, 'error');
+            return;
+        }
+
         const roleSelect = document.getElementById('addUserRoleSelect');
 
         if (!roleSelect) {
-            console.error('Modal elements not found');
+            UI.showAlert('Modal not ready. Please try again.', 'error');
             return;
         }
 
@@ -745,6 +784,9 @@ const Workspace = {
 
         // Close modal before operation
         this.closeAddUserModal();
+
+        // Show loading indicator
+        UI.showAlert(`Adding ${summary} to workspace...`, 'info');
 
         // Use bulk operation handler
         await API.executeBulkOperation({
@@ -878,7 +920,7 @@ const Workspace = {
                 UI.showAlert(`✗ ${errorMessage}`, 'error');
             }
         } catch (error) {
-            UI.showAlert('Error adding user', 'error');
+            UI.showAlert('Error adding user. Please check your connection and try again.', 'error');
             console.error('Add user error:', error);
         }
     },
@@ -903,15 +945,27 @@ const Workspace = {
      * @param {string} identifier - User identifier
      */
     async removeUser(identifier) {
-        if (!this.canEditWorkspace()) {
+        // Guard: Block if app is frozen or operation in progress
+        if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('removeUser')) {
+            return;
+        }
+
+        // Fail-fast permission check
+        if (!Permissions.canEditCurrentWorkspace()) {
             UI.showAlert('You need Admin or Member role to remove users', 'error');
             return;
         }
 
         const user = AppState.allUsersById.get(identifier);
-        if (!user) return;
+        if (!user) {
+            UI.showAlert('User not found', 'error');
+            return;
+        }
 
         if (!confirm(`Remove ${user.displayName || user.emailAddress} from workspace?`)) return;
+
+        // Show loading feedback
+        UI.showAlert(`Removing ${user.displayName || user.emailAddress}...`, 'info');
 
         try {
             const response = await apiCall(
@@ -939,7 +993,7 @@ const Workspace = {
                 UI.showAlert('Failed to remove user', 'error');
             }
         } catch (error) {
-            UI.showAlert('Error removing user', 'error');
+            UI.showAlert('Error removing user. Please check your connection and try again.', 'error');
             console.error('Remove user error:', error);
         }
     },
@@ -996,14 +1050,20 @@ const Workspace = {
      * Bulk remove selected users
      */
     async bulkRemoveUsers() {
-        if (!this.canEditWorkspace()) {
-            UI.showAlert('You need Admin or Member role for this action', 'error');
+        if (AppState.selectedUsers.size === 0) return;
+
+        // Preflight check: permissions + token validity
+        const preflight = Permissions.preflightCheck({ requireEdit: true, minTokenMinutes: 3 });
+        if (!preflight.allowed) {
+            UI.showAlert(preflight.message, 'error');
             return;
         }
 
-        if (AppState.selectedUsers.size === 0) return;
-
         if (!confirm(`Remove ${AppState.selectedUsers.size} user(s) from workspace?`)) return;
+
+        // Set loading state
+        const bulkRemoveBtn = document.querySelector('[onclick*="bulkRemoveUsers"]');
+        UI.setButtonLoading(bulkRemoveBtn, true);
 
         await API.executeBulkOperation({
             items: AppState.selectedUsers,
@@ -1026,6 +1086,9 @@ const Workspace = {
 
         AppState.selectedUsers.clear();
         await this.loadWorkspaceUsers();
+
+        // Clear loading state
+        UI.setButtonLoading(bulkRemoveBtn, false);
     }
 };
 
@@ -1090,10 +1153,6 @@ function showAddUserModal() {
     return Workspace.showAddUserModal();
 }
 
-function selectUserSuggestion(email, displayName, principalType) {
-    return Workspace.selectUserSuggestion(email, displayName, principalType);
-}
-
 function closeAddUserModal() {
     return Workspace.closeAddUserModal();
 }
@@ -1130,4 +1189,4 @@ function removeUserFromSelectedList(identifier) {
     return Workspace.removeUserFromSelectedList(identifier);
 }
 
-console.log('✓ Workspace module loaded');
+// Workspace module loaded

@@ -114,11 +114,78 @@ const User = {
 
     /**
      * Parallel loading fallback when cache isn't ready
+     * Loads users from all workspaces in parallel batches
      */
     async loadUserWorkspacesParallel() {
-        // Implementation from index.html line 3262
-        // Stub for now - see MIGRATION.md
-        console.warn('loadUserWorkspacesParallel - stub implementation');
+        const userIdentifier = AppState.selectedViewUser.email;
+        const userEmail = AppState.selectedViewUser.email?.toLowerCase();
+        const total = AppState.allWorkspacesCache.length;
+        let processed = 0;
+
+        UI.showAlert(`Scanning workspaces... 0/${total}`, 'info');
+
+        for (let i = 0; i < total; i += CONFIG.BATCH_SIZE) {
+            const batch = AppState.allWorkspacesCache.slice(i, i + CONFIG.BATCH_SIZE);
+
+            const results = await Promise.allSettled(
+                batch.map(async (workspace) => {
+                    try {
+                        // Check cache first
+                        let users = AppState.workspaceUserMap.get(workspace.id);
+
+                        if (!users) {
+                            const response = await apiCall(
+                                `${CONFIG.API.POWER_BI}/groups/${workspace.id}/users`
+                            );
+                            if (response.ok) {
+                                const data = await response.json();
+                                users = data.value || [];
+                                // Cache for future use
+                                AppState.workspaceUserMap.set(workspace.id, users);
+                                Cache.cacheUsersFromWorkspace(users);
+                            } else {
+                                return null;
+                            }
+                        }
+
+                        // Check if user is in this workspace
+                        const userInWorkspace = users.find(u =>
+                            u.identifier === userIdentifier ||
+                            u.emailAddress?.toLowerCase() === userEmail
+                        );
+
+                        if (userInWorkspace) {
+                            return {
+                                ...workspace,
+                                userRole: userInWorkspace.groupUserAccessRight
+                            };
+                        }
+                        return null;
+                    } catch (e) {
+                        return null;
+                    }
+                })
+            );
+
+            // Collect results
+            results.forEach(result => {
+                if (result.status === 'fulfilled' && result.value) {
+                    AppState.userWorkspaces.push(result.value);
+                }
+            });
+
+            processed += batch.length;
+
+            // Update progress
+            if (processed % 30 === 0 || processed === total) {
+                UI.showAlert(`Scanning workspaces... ${processed}/${total}`, 'info');
+            }
+
+            // Rate limit delay
+            if (i + CONFIG.BATCH_SIZE < total) {
+                await Utils.sleep(CONFIG.RATE_LIMIT_DELAY);
+            }
+        }
     },
 
     /**
@@ -339,11 +406,29 @@ const User = {
      * Add user to selected workspaces
      */
     async addUserToSelectedWorkspaces() {
+        // Guard: Block if app is frozen
+        if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('addUserToSelectedWorkspaces')) {
+            return;
+        }
+
         const checkboxes = document.querySelectorAll('#availableWorkspacesList input:checked');
         const workspaceIds = Array.from(checkboxes).map(cb => cb.value);
 
         if (workspaceIds.length === 0) {
             UI.showAlert('Select at least one workspace', 'error');
+            return;
+        }
+
+        // Preflight check: token validity for bulk operation
+        const tokenCheck = Permissions.checkTokenValidity(5);
+        if (!tokenCheck.valid) {
+            UI.showAlert(tokenCheck.message, 'error');
+            return;
+        }
+
+        // Check if operation already in progress
+        if (AppState.operationInProgress) {
+            UI.showAlert('Please wait for the current operation to complete', 'warning');
             return;
         }
 
@@ -361,61 +446,70 @@ const User = {
             return;
         }
 
+        // Set loading state
+        AppState.operationInProgress = true;
+        UI.showAlert(`Adding to ${workspaceIds.length} workspace(s)...`, 'info');
+
         let successCount = 0;
         let failureCount = 0;
 
-        // Process in batches
-        for (let i = 0; i < workspaceIds.length; i += CONFIG.BATCH_SIZE) {
-            const batch = workspaceIds.slice(i, i + CONFIG.BATCH_SIZE);
-            const results = await Promise.allSettled(
-                batch.map(workspaceId => {
-                    const requestBody = {
-                        groupUserAccessRight: role,
-                        principalType: AppState.selectedViewUser.principalType || 'User',
-                        identifier: AppState.selectedViewUser.id
-                    };
+        try {
+            // Process in batches
+            for (let i = 0; i < workspaceIds.length; i += CONFIG.BATCH_SIZE) {
+                const batch = workspaceIds.slice(i, i + CONFIG.BATCH_SIZE);
+                const results = await Promise.allSettled(
+                    batch.map(workspaceId => {
+                        const requestBody = {
+                            groupUserAccessRight: role,
+                            principalType: AppState.selectedViewUser.principalType || 'User',
+                            identifier: AppState.selectedViewUser.id
+                        };
 
-                    // For users, also include emailAddress
-                    if (!isGroup && AppState.selectedViewUser.email) {
-                        requestBody.emailAddress = AppState.selectedViewUser.email;
-                    }
-
-                    return apiCall(
-                        `${CONFIG.API.POWER_BI}/groups/${workspaceId}/users`,
-                        {
-                            method: 'POST',
-                            body: JSON.stringify(requestBody)
+                        // For users, also include emailAddress
+                        if (!isGroup && AppState.selectedViewUser.email) {
+                            requestBody.emailAddress = AppState.selectedViewUser.email;
                         }
-                    ).then(response => ({ response, workspaceId }));
-                })
-            );
 
-            results.forEach((result, idx) => {
-                if (result.status === 'fulfilled' && result.value.response.ok) {
-                    successCount++;
-                    // Invalidate cache for this workspace
-                    AppState.workspaceUserMap.delete(batch[idx]);
-                } else {
-                    failureCount++;
+                        return apiCall(
+                            `${CONFIG.API.POWER_BI}/groups/${workspaceId}/users`,
+                            {
+                                method: 'POST',
+                                body: JSON.stringify(requestBody)
+                            }
+                        ).then(response => ({ response, workspaceId }));
+                    })
+                );
+
+                results.forEach((result, idx) => {
+                    if (result.status === 'fulfilled' && result.value.response.ok) {
+                        successCount++;
+                        // Invalidate cache for this workspace
+                        AppState.workspaceUserMap.delete(batch[idx]);
+                    } else {
+                        failureCount++;
+                    }
+                });
+
+                if (i + CONFIG.BATCH_SIZE < workspaceIds.length) {
+                    await Utils.sleep(CONFIG.RATE_LIMIT_DELAY);
                 }
-            });
-
-            if (i + CONFIG.BATCH_SIZE < workspaceIds.length) {
-                await Utils.sleep(CONFIG.RATE_LIMIT_DELAY);
             }
-        }
 
-        // Show comprehensive feedback
-        if (failureCount === 0) {
-            UI.showAlert(`✓ Successfully added to ${successCount} workspace(s)`, 'success');
-        } else if (successCount === 0) {
-            UI.showAlert(`✗ Failed to add to workspaces`, 'error');
-        } else {
-            UI.showAlert(`⚠ Partially completed: Added to ${successCount} workspace(s), ${failureCount} failed`, 'error');
-        }
+            // Show comprehensive feedback
+            if (failureCount === 0) {
+                UI.showAlert(`✓ Successfully added to ${successCount} workspace(s)`, 'success');
+            } else if (successCount === 0) {
+                UI.showAlert(`✗ Failed to add to workspaces`, 'error');
+            } else {
+                UI.showAlert(`⚠ Partially completed: Added to ${successCount} workspace(s), ${failureCount} failed`, 'warning');
+            }
 
-        this.closeAddWorkspaceAccessModal();
-        await this.loadUserWorkspaces();
+            this.closeAddWorkspaceAccessModal();
+            await this.loadUserWorkspaces();
+        } finally {
+            // CRITICAL: Always reset operation state
+            AppState.operationInProgress = false;
+        }
     },
 
     /**
@@ -423,7 +517,25 @@ const User = {
      * @param {string} newRole - New role to set
      */
     async bulkChangeUserRole(newRole) {
+        // Guard: Block if app is frozen
+        if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('bulkChangeUserRole')) {
+            return;
+        }
+
         if (AppState.selectedWorkspacesForUser.size === 0) return;
+
+        // Preflight check: token validity for bulk operation
+        const tokenCheck = Permissions.checkTokenValidity(5);
+        if (!tokenCheck.valid) {
+            UI.showAlert(tokenCheck.message, 'error');
+            return;
+        }
+
+        // Check if operation already in progress
+        if (AppState.operationInProgress) {
+            UI.showAlert('Please wait for the current operation to complete', 'warning');
+            return;
+        }
 
         // Check if user has permission for at least one selected workspace
         const hasAnyPermission = Array.from(AppState.selectedWorkspacesForUser).some(wsId =>
@@ -435,6 +547,10 @@ const User = {
         }
 
         if (!confirm(`Change role to ${newRole} for ${AppState.selectedWorkspacesForUser.size} workspace(s)?`)) return;
+
+        // Set loading state
+        AppState.operationInProgress = true;
+        UI.showAlert(`Changing role in ${AppState.selectedWorkspacesForUser.size} workspace(s)...`, 'info');
 
         const isGroup = AppState.selectedViewUser.principalType === 'Group';
         const workspaceIds = Array.from(AppState.selectedWorkspacesForUser);
@@ -454,51 +570,74 @@ const User = {
         let successCount = 0;
         let failureCount = 0;
 
-        for (let i = 0; i < workspaceIds.length; i += CONFIG.BATCH_SIZE) {
-            const batch = workspaceIds.slice(i, i + CONFIG.BATCH_SIZE);
-            const results = await Promise.allSettled(
-                batch.map(workspaceId =>
-                    apiCall(
-                        `${CONFIG.API.POWER_BI}/groups/${workspaceId}/users`,
-                        { method: 'PUT', body: bodyStr }
+        try {
+            for (let i = 0; i < workspaceIds.length; i += CONFIG.BATCH_SIZE) {
+                const batch = workspaceIds.slice(i, i + CONFIG.BATCH_SIZE);
+                const results = await Promise.allSettled(
+                    batch.map(workspaceId =>
+                        apiCall(
+                            `${CONFIG.API.POWER_BI}/groups/${workspaceId}/users`,
+                            { method: 'PUT', body: bodyStr }
+                        )
                     )
-                )
-            );
+                );
 
-            // Collect successes and failures
-            results.forEach((result, idx) => {
-                if (result.status === 'fulfilled' && result.value.ok) {
-                    successCount++;
-                    // Invalidate cache for this workspace
-                    AppState.workspaceUserMap.delete(batch[idx]);
-                } else {
-                    failureCount++;
+                // Collect successes and failures
+                results.forEach((result, idx) => {
+                    if (result.status === 'fulfilled' && result.value.ok) {
+                        successCount++;
+                        // Invalidate cache for this workspace
+                        AppState.workspaceUserMap.delete(batch[idx]);
+                    } else {
+                        failureCount++;
+                    }
+                });
+
+                if (i + CONFIG.BATCH_SIZE < workspaceIds.length) {
+                    await Utils.sleep(CONFIG.RATE_LIMIT_DELAY);
                 }
-            });
-
-            if (i + CONFIG.BATCH_SIZE < workspaceIds.length) {
-                await Utils.sleep(CONFIG.RATE_LIMIT_DELAY);
             }
-        }
 
-        // Show comprehensive feedback
-        if (failureCount === 0) {
-            UI.showAlert(`✓ Successfully changed ${successCount} role(s) to ${newRole}`, 'success');
-        } else if (successCount === 0) {
-            UI.showAlert(`✗ Failed to change roles`, 'error');
-        } else {
-            UI.showAlert(`⚠ Partially completed: ${successCount} changed, ${failureCount} failed`, 'error');
-        }
+            // Show comprehensive feedback
+            if (failureCount === 0) {
+                UI.showAlert(`✓ Successfully changed ${successCount} role(s) to ${newRole}`, 'success');
+            } else if (successCount === 0) {
+                UI.showAlert(`✗ Failed to change roles`, 'error');
+            } else {
+                UI.showAlert(`⚠ Partially completed: ${successCount} changed, ${failureCount} failed`, 'warning');
+            }
 
-        AppState.selectedWorkspacesForUser.clear();
-        await this.loadUserWorkspaces();
+            AppState.selectedWorkspacesForUser.clear();
+            await this.loadUserWorkspaces();
+        } finally {
+            // CRITICAL: Always reset operation state
+            AppState.operationInProgress = false;
+        }
     },
 
     /**
      * Bulk remove user from selected workspaces
      */
     async bulkRemoveFromWorkspaces() {
+        // Guard: Block if app is frozen
+        if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('bulkRemoveFromWorkspaces')) {
+            return;
+        }
+
         if (AppState.selectedWorkspacesForUser.size === 0) return;
+
+        // Preflight check: token validity for bulk operation
+        const tokenCheck = Permissions.checkTokenValidity(5);
+        if (!tokenCheck.valid) {
+            UI.showAlert(tokenCheck.message, 'error');
+            return;
+        }
+
+        // Check if operation already in progress
+        if (AppState.operationInProgress) {
+            UI.showAlert('Please wait for the current operation to complete', 'warning');
+            return;
+        }
 
         // Check if user has permission for at least one selected workspace
         const hasAnyPermission = Array.from(AppState.selectedWorkspacesForUser).some(wsId =>
@@ -511,56 +650,181 @@ const User = {
 
         if (!confirm(`Remove ${AppState.selectedViewUser.displayName} from ${AppState.selectedWorkspacesForUser.size} workspace(s)?`)) return;
 
+        // Set loading state
+        AppState.operationInProgress = true;
+        UI.showAlert(`Removing from ${AppState.selectedWorkspacesForUser.size} workspace(s)...`, 'info');
+
         const userIdentifier = AppState.selectedViewUser.id;
         const workspaceIds = Array.from(AppState.selectedWorkspacesForUser);
         let successCount = 0;
         let failureCount = 0;
 
-        // Process in parallel batches
-        for (let i = 0; i < workspaceIds.length; i += CONFIG.BATCH_SIZE) {
-            const batch = workspaceIds.slice(i, i + CONFIG.BATCH_SIZE);
-            const results = await Promise.allSettled(
-                batch.map(workspaceId =>
-                    apiCall(
-                        `${CONFIG.API.POWER_BI}/groups/${workspaceId}/users/${encodeURIComponent(userIdentifier)}`,
-                        { method: 'DELETE' }
+        try {
+            // Process in parallel batches
+            for (let i = 0; i < workspaceIds.length; i += CONFIG.BATCH_SIZE) {
+                const batch = workspaceIds.slice(i, i + CONFIG.BATCH_SIZE);
+                const results = await Promise.allSettled(
+                    batch.map(workspaceId =>
+                        apiCall(
+                            `${CONFIG.API.POWER_BI}/groups/${workspaceId}/users/${encodeURIComponent(userIdentifier)}`,
+                            { method: 'DELETE' }
+                        )
                     )
-                )
+                );
+
+                // Collect successes and failures
+                results.forEach((result, idx) => {
+                    if (result.status === 'fulfilled' && result.value.ok) {
+                        successCount++;
+                        // Invalidate cache for this workspace
+                        AppState.workspaceUserMap.delete(batch[idx]);
+                    } else {
+                        failureCount++;
+                    }
+                });
+
+                if (i + CONFIG.BATCH_SIZE < workspaceIds.length) {
+                    await Utils.sleep(CONFIG.RATE_LIMIT_DELAY);
+                }
+            }
+
+            // Show comprehensive feedback
+            if (failureCount === 0) {
+                UI.showAlert(`✓ Successfully removed from ${successCount} workspace(s)`, 'success');
+            } else if (successCount === 0) {
+                UI.showAlert(`✗ Failed to remove from workspaces`, 'error');
+            } else {
+                UI.showAlert(`⚠ Partially completed: Removed from ${successCount} workspace(s), ${failureCount} failed`, 'warning');
+            }
+
+            AppState.selectedWorkspacesForUser.clear();
+            await this.loadUserWorkspaces();
+            Cache.rebuildKnownUsersCache();
+        } finally {
+            // CRITICAL: Always reset operation state
+            AppState.operationInProgress = false;
+        }
+    },
+
+    /**
+     * Remove user from a single workspace
+     * @param {string} workspaceId - Workspace ID
+     */
+    async removeUserFromWorkspace(workspaceId) {
+        // Guard: Block if app is frozen or operation in progress
+        if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('removeUserFromWorkspace')) {
+            return;
+        }
+
+        if (!this.canEditWorkspaceById(workspaceId)) {
+            UI.showAlert('You need Admin or Member role in this workspace', 'error');
+            return;
+        }
+
+        const workspace = AppState.userWorkspacesById.get(workspaceId);
+        const workspaceName = workspace?.name || 'workspace';
+
+        if (!confirm(`Remove ${AppState.selectedViewUser.displayName} from "${workspaceName}"?`)) {
+            return;
+        }
+
+        AppState.operationInProgress = true;
+        try {
+            UI.showAlert('Removing user...', 'info');
+
+            const response = await apiCall(
+                `${CONFIG.API.POWER_BI}/groups/${workspaceId}/users/${encodeURIComponent(AppState.selectedViewUser.id)}`,
+                { method: 'DELETE' }
             );
 
-            // Collect successes and failures
-            results.forEach((result, idx) => {
-                if (result.status === 'fulfilled' && result.value.ok) {
-                    successCount++;
-                    // Invalidate cache for this workspace
-                    AppState.workspaceUserMap.delete(batch[idx]);
-                } else {
-                    failureCount++;
-                }
-            });
-
-            if (i + CONFIG.BATCH_SIZE < workspaceIds.length) {
-                await Utils.sleep(CONFIG.RATE_LIMIT_DELAY);
+            if (response.ok) {
+                // Invalidate cache
+                AppState.workspaceUserMap.delete(workspaceId);
+                UI.showAlert(`✓ Removed from "${workspaceName}"`, 'success');
+                await this.loadUserWorkspaces();
+            } else {
+                const errorData = await response.json().catch(() => ({}));
+                UI.showAlert(errorData.error?.message || 'Failed to remove user', 'error');
             }
+        } catch (error) {
+            UI.showAlert('Error removing user. Please try again.', 'error');
+            console.error('Remove user error:', error);
+        } finally {
+            AppState.operationInProgress = false;
+        }
+    },
+
+    /**
+     * Change user role in a single workspace
+     * @param {string} workspaceId - Workspace ID
+     */
+    async changeUserWorkspaceRole(workspaceId) {
+        // Guard: Block if app is frozen or operation in progress
+        if (typeof ActionGuard !== 'undefined' && !ActionGuard.canProceed('changeUserWorkspaceRole')) {
+            return;
         }
 
-        // Show comprehensive feedback
-        if (failureCount === 0) {
-            UI.showAlert(`✓ Successfully removed from ${successCount} workspace(s)`, 'success');
-        } else if (successCount === 0) {
-            UI.showAlert(`✗ Failed to remove from workspaces`, 'error');
-        } else {
-            UI.showAlert(`⚠ Partially completed: Removed from ${successCount} workspace(s), ${failureCount} failed`, 'error');
+        if (!this.canEditWorkspaceById(workspaceId)) {
+            UI.showAlert('You need Admin or Member role in this workspace', 'error');
+            return;
         }
 
-        AppState.selectedWorkspacesForUser.clear();
-        await this.loadUserWorkspaces();
-        Cache.rebuildKnownUsersCache();
+        const workspace = AppState.userWorkspacesById.get(workspaceId);
+        const workspaceName = workspace?.name || 'workspace';
+        const currentRole = workspace?.userRole || 'Viewer';
+
+        // Prompt for new role
+        const newRole = prompt(
+            `Change role for ${AppState.selectedViewUser.displayName} in "${workspaceName}":\n\nCurrent role: ${currentRole}\n\nEnter new role (Admin, Member, Contributor, Viewer):`,
+            currentRole
+        );
+
+        if (!newRole || newRole === currentRole) return;
+
+        // Validate role
+        const validRoles = ['Admin', 'Member', 'Contributor', 'Viewer'];
+        const normalizedRole = validRoles.find(r => r.toLowerCase() === newRole.toLowerCase());
+
+        if (!normalizedRole) {
+            UI.showAlert('Invalid role. Choose: Admin, Member, Contributor, or Viewer', 'error');
+            return;
+        }
+
+        AppState.operationInProgress = true;
+        try {
+            UI.showAlert('Changing role...', 'info');
+
+            const isGroup = AppState.selectedViewUser.principalType === 'Group';
+            const requestBody = {
+                groupUserAccessRight: normalizedRole,
+                principalType: AppState.selectedViewUser.principalType || 'User',
+                identifier: AppState.selectedViewUser.id
+            };
+            if (!isGroup && AppState.selectedViewUser.email) {
+                requestBody.emailAddress = AppState.selectedViewUser.email;
+            }
+
+            const response = await apiCall(
+                `${CONFIG.API.POWER_BI}/groups/${workspaceId}/users`,
+                { method: 'PUT', body: JSON.stringify(requestBody) }
+            );
+
+            if (response.ok) {
+                // Invalidate cache
+                AppState.workspaceUserMap.delete(workspaceId);
+                UI.showAlert(`✓ Changed role to ${normalizedRole} in "${workspaceName}"`, 'success');
+                await this.loadUserWorkspaces();
+            } else {
+                const errorData = await response.json().catch(() => ({}));
+                UI.showAlert(errorData.error?.message || 'Failed to change role', 'error');
+            }
+        } catch (error) {
+            UI.showAlert('Error changing role. Please try again.', 'error');
+            console.error('Change role error:', error);
+        } finally {
+            AppState.operationInProgress = false;
+        }
     }
-
-    // Additional functions to implement (see MIGRATION.md):
-    // - removeUserFromWorkspace() - Single workspace remove
-    // - changeUserWorkspaceRole() - Single workspace role change
 };
 
 // Legacy global functions
@@ -616,5 +880,12 @@ function bulkRemoveUserFromWorkspaces() {
     return User.bulkRemoveFromWorkspaces();
 }
 
-console.log('✓ User module loaded');
-console.warn('⚠️ Individual workspace role change/remove functions can be added if needed - see MIGRATION.md');
+function removeUserFromWorkspace(workspaceId) {
+    return User.removeUserFromWorkspace(workspaceId);
+}
+
+function changeUserWorkspaceRole(workspaceId) {
+    return User.changeUserWorkspaceRole(workspaceId);
+}
+
+// User module loaded

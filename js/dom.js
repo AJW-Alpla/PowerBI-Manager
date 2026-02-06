@@ -69,8 +69,13 @@ const DOM = {
 
     /**
      * Initialize DOM cache - call on page load
+     * @returns {boolean} True if all critical elements found, false otherwise
      */
     init() {
+        // Critical elements that MUST exist for app to work
+        const criticalElements = [];
+        const missingElements = [];
+
         // View Containers
         this.workspaceView = document.getElementById('workspaceView');
         this.userView = document.getElementById('userView');
@@ -81,7 +86,7 @@ const DOM = {
         this.userViewBtn = document.getElementById('userViewBtn');
         this.adminViewBtn = document.getElementById('adminViewBtn');
 
-        // Workspace View
+        // Workspace View (critical)
         this.workspaceSearch = document.getElementById('workspaceSearch');
         this.workspaceSuggestions = document.getElementById('workspaceSuggestions');
         this.selectedWorkspaceInfo = document.getElementById('selectedWorkspaceInfo');
@@ -130,7 +135,35 @@ const DOM = {
         this.newUserType = document.getElementById('newUserType');
         this.addUserSuggestions = document.getElementById('addUserSuggestions');
 
-        console.log('✓ DOM cache initialized');
+        // Track critical elements that MUST exist
+        criticalElements.push(
+            { name: 'workspaceView', el: this.workspaceView },
+            { name: 'userView', el: this.userView },
+            { name: 'workspaceSearch', el: this.workspaceSearch },
+            { name: 'userTableBody', el: this.userTableBody },
+            { name: 'userWorkspacesTable', el: this.userWorkspacesTable }
+        );
+
+        // Check for missing critical elements
+        criticalElements.forEach(({ name, el }) => {
+            if (!el) missingElements.push(name);
+        });
+
+        if (missingElements.length > 0) {
+            console.warn('Missing critical DOM elements:', missingElements.join(', '));
+        }
+
+        // DOM cache initialized
+        return missingElements.length === 0;
+    },
+
+    /**
+     * Safely get element, returns null if not cached
+     * @param {string} elementName - Name of cached element
+     * @returns {HTMLElement|null}
+     */
+    get(elementName) {
+        return this[elementName] || null;
     }
 };
 
@@ -140,11 +173,20 @@ const DOM = {
 
 const UI = {
     /**
-     * Show alert message
+     * Show alert message with optional retry button
      * @param {string} message - Alert message
      * @param {string} type - Alert type: 'success', 'error', 'info', 'warning'
+     * @param {object} options - Optional { showRetry: boolean, onRetry: function }
      */
-    showAlert(message, type = 'info') {
+    showAlert(message, type = 'info', options = {}) {
+        // Ensure AppState exists
+        if (typeof AppState === 'undefined') {
+            console.warn('AppState not initialized, cannot show alert:', message);
+            return;
+        }
+
+        const { showRetry = false, onRetry = null } = options;
+
         // Reuse existing alert element for performance
         if (!AppState.alertElement) {
             AppState.alertElement = document.createElement('div');
@@ -157,12 +199,118 @@ const UI = {
         }
 
         AppState.alertElement.className = `alert ${type}`;
-        AppState.alertElement.textContent = message;
+
+        // Check if retry should be shown (either explicit or from lastError)
+        const hasRetry = showRetry || (AppState.lastError?.mapped?.retryable && type === 'warning');
+
+        if (hasRetry) {
+            AppState.alertElement.innerHTML = `
+                <span>${Utils.escapeHtml(message)}</span>
+                <button class="alert-retry-btn" onclick="UI.handleRetry()">Retry</button>
+            `;
+            // Store retry callback
+            if (onRetry) {
+                AppState.lastError = { onRetry };
+            }
+        } else {
+            AppState.alertElement.textContent = message;
+        }
+
         AppState.alertElement.style.display = 'block';
 
+        // Longer timeout for errors (6s) vs info (4s), even longer for retryable (10s)
+        const timeout = hasRetry ? 10000 : (type === 'error' ? 6000 : 4000);
+
         AppState.alertTimeout = setTimeout(() => {
-            AppState.alertElement.style.display = 'none';
-        }, 4000);
+            if (AppState.alertElement) {
+                AppState.alertElement.style.display = 'none';
+            }
+        }, timeout);
+    },
+
+    /**
+     * Handle retry button click
+     */
+    handleRetry() {
+        if (AppState.lastError?.onRetry) {
+            // Hide alert first
+            if (AppState.alertElement) {
+                AppState.alertElement.style.display = 'none';
+            }
+            // Execute retry
+            const retryFn = AppState.lastError.onRetry;
+            AppState.lastError = null;
+            retryFn();
+        } else if (typeof ErrorHandler !== 'undefined') {
+            ErrorHandler.retryLast();
+        }
+    },
+
+    /**
+     * Set button loading state
+     * @param {HTMLElement|string} button - Button element or selector
+     * @param {boolean} loading - Whether button is loading
+     * @param {string} loadingText - Optional text to show while loading
+     */
+    setButtonLoading(button, loading, loadingText = null) {
+        const btn = typeof button === 'string' ? document.querySelector(button) : button;
+        if (!btn) return;
+
+        if (loading) {
+            btn.classList.add('loading');
+            btn.disabled = true;
+            if (loadingText) {
+                btn.dataset.originalText = btn.textContent;
+                btn.textContent = loadingText;
+            }
+        } else {
+            btn.classList.remove('loading');
+            btn.disabled = false;
+            if (btn.dataset.originalText) {
+                btn.textContent = btn.dataset.originalText;
+                delete btn.dataset.originalText;
+            }
+        }
+    },
+
+    /**
+     * Set container loading state with overlay
+     * @param {HTMLElement|string} container - Container element or selector
+     * @param {boolean} loading - Whether container is loading
+     */
+    setContainerLoading(container, loading) {
+        const el = typeof container === 'string' ? document.querySelector(container) : container;
+        if (!el) return;
+
+        if (loading) {
+            el.classList.add('loadable');
+            // Add overlay if not present
+            if (!el.querySelector('.loading-overlay')) {
+                const overlay = document.createElement('div');
+                overlay.className = 'loading-overlay';
+                overlay.innerHTML = '<div class="loading-spinner"></div>';
+                el.appendChild(overlay);
+            }
+        } else {
+            const overlay = el.querySelector('.loading-overlay');
+            if (overlay) overlay.remove();
+        }
+    },
+
+    /**
+     * Set table loading state
+     * @param {HTMLElement|string} table - Table element or selector
+     * @param {boolean} loading - Whether table is loading
+     */
+    setTableLoading(table, loading) {
+        const el = typeof table === 'string' ? document.querySelector(table) : table;
+        if (!el) return;
+
+        if (loading) {
+            el.classList.add('table-loading');
+        } else {
+            el.classList.remove('table-loading');
+        }
     },
 
     /**
@@ -189,7 +337,9 @@ const UI = {
      * @param {string} view - View name: 'workspace', 'user', 'admin'
      */
     switchView(view) {
-        AppState.currentView = view;
+        if (typeof AppState !== 'undefined') {
+            AppState.currentView = view;
+        }
 
         // Update toggle buttons
         document.querySelectorAll('.view-toggle').forEach(btn => {
@@ -197,10 +347,14 @@ const UI = {
         });
         document.querySelector(`[onclick="switchView('${view}')"]`)?.classList.add('active');
 
-        // Show/hide view sections
-        document.getElementById('workspaceViewSection').style.display = view === 'workspace' ? 'block' : 'none';
-        document.getElementById('userViewSection').style.display = view === 'user' ? 'block' : 'none';
-        document.getElementById('adminPanelSection').style.display = view === 'admin' ? 'block' : 'none';
+        // Show/hide view sections (with null checks)
+        const workspaceSection = document.getElementById('workspaceViewSection');
+        const userSection = document.getElementById('userViewSection');
+        const adminSection = document.getElementById('adminPanelSection');
+
+        if (workspaceSection) workspaceSection.style.display = view === 'workspace' ? 'block' : 'none';
+        if (userSection) userSection.style.display = view === 'user' ? 'block' : 'none';
+        if (adminSection) adminSection.style.display = view === 'admin' ? 'block' : 'none';
     },
 
     /**

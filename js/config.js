@@ -77,6 +77,8 @@ const AppState = {
 
     // Operation State
     operationInProgress: false,
+    currentUIState: 'init', // UIState enum: init, loading, ready, error, authenticating, refreshing
+    lastError: null, // For retry functionality
 
     // Timers
     searchTimeout: null,
@@ -93,4 +95,4 @@ const AppState = {
     alertElement: null
 };
 
-console.log('✓ Configuration loaded');
+// Configuration loaded

@@ -5,23 +5,83 @@
  * Handles initialization, view switching, event delegation, and keyboard shortcuts
  */
 
+// ============================================
+// GLOBAL ERROR HANDLERS
+// ============================================
+
+// Catch unhandled errors
+window.onerror = function(message, source, lineno, colno, error) {
+    console.error('[Global Error]', { message, source, lineno, colno, error });
+
+    // Check if this is a fatal error
+    const fatalPatterns = [
+        'Maximum call stack size exceeded',
+        'out of memory',
+        'too much recursion'
+    ];
+
+    const isFatal = fatalPatterns.some(pattern =>
+        (message || '').toLowerCase().includes(pattern.toLowerCase())
+    );
+
+    if (isFatal && typeof FatalError !== 'undefined') {
+        FatalError.trigger('A critical JavaScript error occurred.', {
+            message, source, lineno, colno
+        });
+    }
+
+    // Return false to allow default error handling
+    return false;
+};
+
+// Catch unhandled promise rejections
+window.onunhandledrejection = function(event) {
+    console.error('[Unhandled Promise Rejection]', event.reason);
+
+    // Check for fatal patterns
+    const message = event.reason?.message || String(event.reason);
+    const fatalPatterns = [
+        'Maximum call stack size exceeded',
+        'out of memory'
+    ];
+
+    const isFatal = fatalPatterns.some(pattern =>
+        message.toLowerCase().includes(pattern.toLowerCase())
+    );
+
+    if (isFatal && typeof FatalError !== 'undefined') {
+        FatalError.trigger('A critical async error occurred.', {
+            reason: message
+        });
+    }
+};
+
 const App = {
     /**
      * Switch between views (workspace, user, admin)
      * @param {string} view - View name ('workspace', 'user', or 'admin')
      */
     switchView(view) {
+        // Cancel any pending API requests from previous view to prevent ghost requests
+        if (typeof API !== 'undefined' && API.cancelAllRequests) {
+            API.cancelAllRequests();
+        }
+
+        // Clear any pending error retry
+        AppState.lastError = null;
+
         AppState.currentView = view;
+        AppState.currentUIState = typeof UIState !== 'undefined' ? UIState.READY : 'ready';
 
-        // Update view visibility
-        DOM.workspaceView.style.display = view === 'workspace' ? 'block' : 'none';
-        DOM.userView.style.display = view === 'user' ? 'block' : 'none';
-        DOM.adminView.style.display = view === 'admin' ? 'block' : 'none';
+        // Update view visibility (with null checks)
+        if (DOM.workspaceView) DOM.workspaceView.style.display = view === 'workspace' ? 'block' : 'none';
+        if (DOM.userView) DOM.userView.style.display = view === 'user' ? 'block' : 'none';
+        if (DOM.adminView) DOM.adminView.style.display = view === 'admin' ? 'block' : 'none';
 
-        // Update button states
-        DOM.workspaceViewBtn.classList.toggle('active', view === 'workspace');
-        DOM.userViewBtn.classList.toggle('active', view === 'user');
-        DOM.adminViewBtn.classList.toggle('active', view === 'admin');
+        // Update button states (with null checks)
+        if (DOM.workspaceViewBtn) DOM.workspaceViewBtn.classList.toggle('active', view === 'workspace');
+        if (DOM.userViewBtn) DOM.userViewBtn.classList.toggle('active', view === 'user');
+        if (DOM.adminViewBtn) DOM.adminViewBtn.classList.toggle('active', view === 'admin');
 
         // Load admin workspaces when switching to admin view
         if (view === 'admin' && AppState.isPowerBIAdmin && AppState.adminWorkspaces.length === 0) {
@@ -33,6 +93,8 @@ const App = {
      * Initialize workspace suggestions dropdown
      */
     showWorkspaceSuggestions() {
+        if (!DOM.workspaceSearch || !DOM.workspaceSuggestions) return;
+
         clearTimeout(AppState.workspaceSuggestionTimeout);
         AppState.workspaceSuggestionTimeout = setTimeout(() => {
             const searchTerm = DOM.workspaceSearch.value.trim().toLowerCase();
@@ -71,7 +133,7 @@ const App = {
      */
     hideWorkspaceSuggestions() {
         setTimeout(() => {
-            DOM.workspaceSuggestions.style.display = 'none';
+            if (DOM.workspaceSuggestions) DOM.workspaceSuggestions.style.display = 'none';
         }, 200);
     },
 
@@ -82,7 +144,7 @@ const App = {
     selectWorkspaceSuggestion(workspaceId) {
         const workspace = AppState.allWorkspaces.find(ws => ws.id === workspaceId);
         if (workspace) {
-            DOM.workspaceSearch.value = workspace.name;
+            if (DOM.workspaceSearch) DOM.workspaceSearch.value = workspace.name;
             this.hideWorkspaceSuggestions();
             Workspace.selectWorkspace(workspace);
         }
@@ -92,10 +154,12 @@ const App = {
      * Show user suggestions dropdown (for user view search)
      */
     showUserSuggestions() {
+        const input = DOM.userViewEmailInput;
+        const dropdown = DOM.userSuggestions;
+        if (!input || !dropdown) return;
+
         clearTimeout(AppState.userSuggestionTimeout);
         AppState.userSuggestionTimeout = setTimeout(() => {
-            const input = DOM.userViewEmailInput;
-            const dropdown = DOM.userSuggestions;
             const searchTerm = input.value.trim().toLowerCase();
 
             if (searchTerm.length === 0 || AppState.knownUsers.size === 0) {
@@ -150,7 +214,7 @@ const App = {
      */
     hideUserSuggestions() {
         setTimeout(() => {
-            DOM.userSuggestions.style.display = 'none';
+            if (DOM.userSuggestions) DOM.userSuggestions.style.display = 'none';
         }, 200);
     },
 
@@ -161,9 +225,11 @@ const App = {
      * @param {string} displayName - Display name
      */
     selectUserSuggestion(identifier, principalType = 'User', displayName = '') {
-        DOM.userViewEmailInput.value = identifier;
-        DOM.userViewEmailInput.dataset.principalType = principalType;
-        DOM.userViewEmailInput.dataset.displayName = displayName;
+        if (DOM.userViewEmailInput) {
+            DOM.userViewEmailInput.value = identifier;
+            DOM.userViewEmailInput.dataset.principalType = principalType;
+            DOM.userViewEmailInput.dataset.displayName = displayName;
+        }
         this.hideUserSuggestions();
         User.searchUserByEmail();
     },
@@ -198,6 +264,11 @@ const App = {
      * Setup event delegation for user table (workspace view)
      */
     setupWorkspaceTableEvents() {
+        if (!DOM.userTableBody) {
+            console.warn('userTableBody not found - workspace table events not initialized');
+            return;
+        }
+
         // Click events for remove button
         DOM.userTableBody.addEventListener('click', (e) => {
             const target = e.target;
@@ -227,6 +298,11 @@ const App = {
      * Setup event delegation for user workspaces table (user view)
      */
     setupUserTableEvents() {
+        if (!DOM.userWorkspacesTable) {
+            console.warn('userWorkspacesTable not found - user table events not initialized');
+            return;
+        }
+
         // Click events
         DOM.userWorkspacesTable.addEventListener('click', (e) => {
             const target = e.target;
@@ -234,9 +310,9 @@ const App = {
             const workspaceId = target.dataset.workspaceId;
 
             if (action === 'change-workspace-role' && workspaceId) {
-                // changeUserWorkspaceRole(workspaceId); // TODO: Implement in user.js
+                User.changeUserWorkspaceRole(workspaceId);
             } else if (action === 'remove-from-workspace' && workspaceId) {
-                // removeUserFromWorkspace(workspaceId); // TODO: Implement in user.js
+                User.removeUserFromWorkspace(workspaceId);
             }
         });
 
@@ -282,12 +358,12 @@ const App = {
         document.addEventListener('click', (e) => {
             // Workspace suggestions
             if (!e.target.closest('#workspaceSearch') && !e.target.closest('#workspaceSuggestions')) {
-                DOM.workspaceSuggestions.style.display = 'none';
+                if (DOM.workspaceSuggestions) DOM.workspaceSuggestions.style.display = 'none';
             }
 
             // User suggestions
             if (!e.target.closest('#userViewEmailInput') && !e.target.closest('#userSuggestions')) {
-                DOM.userSuggestions.style.display = 'none';
+                if (DOM.userSuggestions) DOM.userSuggestions.style.display = 'none';
             }
 
             // Add user suggestions
@@ -298,13 +374,11 @@ const App = {
 
             // Admin panel dropdowns
             if (!e.target.closest('#adminWorkspaceSearch') && !e.target.closest('#adminWorkspaceSuggestions')) {
-                const adminWorkspaceDropdown = DOM.adminWorkspaceSuggestions;
-                if (adminWorkspaceDropdown) adminWorkspaceDropdown.style.display = 'none';
+                if (DOM.adminWorkspaceSuggestions) DOM.adminWorkspaceSuggestions.style.display = 'none';
             }
 
             if (!e.target.closest('#adminUserSearch') && !e.target.closest('#adminUserSuggestions')) {
-                const adminUserDropdown = DOM.adminUserSuggestions;
-                if (adminUserDropdown) adminUserDropdown.style.display = 'none';
+                if (DOM.adminUserSuggestions) DOM.adminUserSuggestions.style.display = 'none';
             }
         });
     },
@@ -323,32 +397,82 @@ const App = {
             clearTimeout(AppState.addUserSuggestionTimeout);
             clearTimeout(AppState.adminSuggestionTimeout);
 
-            console.log('Cleanup: All timers cleared');
+            // All timers cleared
         });
     },
 
     /**
-     * Initialize the application
+     * Initialize the application with guarded error handling
      */
     async init() {
-        // Initialize DOM cache for performance
-        DOM.init();
+        try {
+            // Initialize DOM cache for performance
+            const domInitialized = DOM.init();
+            if (!domInitialized) {
+                console.error('Critical DOM elements missing - app may not function correctly');
+                // This is a fatal scenario - cannot recover without DOM
+                if (typeof FatalError !== 'undefined') {
+                    FatalError.trigger(
+                        'Critical page elements are missing. The page may not have loaded correctly.',
+                        { domInitialized }
+                    );
+                    return;
+                }
+            }
 
-        // Setup event listeners
-        this.setupWorkspaceTableEvents();
-        this.setupUserTableEvents();
-        this.setupKeyboardShortcuts();
-        this.setupClickOutsideHandlers();
-        this.setupCleanup();
+            // Setup event listeners with null checks
+            this.setupWorkspaceTableEvents();
+            this.setupUserTableEvents();
+            this.setupKeyboardShortcuts();
+            this.setupClickOutsideHandlers();
+            this.setupCleanup();
 
-        // Check for cached token from previous session
-        const cached = sessionStorage.getItem('pbi_token');
-        if (cached && cached.startsWith('eyJ')) {
-            document.getElementById('manualToken').value = cached;
-            await Auth.authenticateWithToken();
+            // Run initial state diagnostics
+            if (typeof Diagnostics !== 'undefined') {
+                const health = Diagnostics.healthCheck();
+                if (!health.valid) {
+                    console.warn('[Init] Initial state issues:', health.issues);
+                }
+            }
+
+            // Mark app as ready
+            if (typeof AppState !== 'undefined') {
+                AppState.currentUIState = typeof UIState !== 'undefined' ? UIState.READY : 'ready';
+            }
+
+            // Check for cached token from previous session
+            const cached = sessionStorage.getItem('pbi_token');
+            if (cached && cached.startsWith('eyJ')) {
+                const tokenInput = document.getElementById('manualToken');
+                if (tokenInput) {
+                    tokenInput.value = cached;
+                    try {
+                        await Auth.authenticateWithToken();
+                    } catch (authError) {
+                        console.warn('Auto-login with cached token failed:', authError.message);
+                        sessionStorage.removeItem('pbi_token');
+                        UI.showAlert('Previous session expired. Please sign in again.', 'info');
+                    }
+                }
+            }
+
+            console.log('[App] Initialization complete');
+        } catch (error) {
+            console.error('Application initialization failed:', error);
+
+            // Check if this is fatal
+            if (typeof FatalError !== 'undefined' && typeof ActionGuard !== 'undefined') {
+                if (ActionGuard._isFatalError(error)) {
+                    FatalError.trigger(
+                        'Failed to initialize the application.',
+                        { error: error.message }
+                    );
+                    return;
+                }
+            }
+
+            UI.showAlert('Failed to initialize application. Please refresh the page.', 'error');
         }
-
-        console.log('✓ Application initialized');
     }
 };
 
@@ -392,6 +516,8 @@ function toggleWorkspaceSelection(workspaceId) {
 // Additional missing global functions
 function searchWorkspace() {
     // Get search value and find matching workspace
+    if (!DOM.workspaceSearch) return;
+
     const searchValue = DOM.workspaceSearch.value.trim();
     if (!searchValue) {
         UI.showAlert('Please enter a workspace name', 'error');
@@ -410,6 +536,8 @@ function searchWorkspace() {
 }
 
 function toggleSelectAll(checked) {
+    if (!DOM.userTableBody) return;
+
     // Toggle all user checkboxes in workspace view
     const checkboxes = DOM.userTableBody.querySelectorAll('input[type="checkbox"][data-action="toggle-user"]');
     checkboxes.forEach(cb => {
@@ -429,6 +557,8 @@ function toggleSelectAll(checked) {
 }
 
 function toggleAllUserWorkspaces(checked) {
+    if (!DOM.userWorkspacesTable) return;
+
     // Toggle all workspace checkboxes in user view
     const checkboxes = DOM.userWorkspacesTable.querySelectorAll('input[type="checkbox"][data-action="toggle-workspace"]');
     checkboxes.forEach(cb => {
@@ -510,4 +640,4 @@ window.addEventListener('load', () => {
     App.init();
 });
 
-console.log('✓ App module loaded');
+// App module loaded

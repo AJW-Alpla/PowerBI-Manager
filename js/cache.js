@@ -158,7 +158,7 @@ const Cache = {
 
         // Only sync if cache is expired
         if (this.isCacheExpired(AppState.currentWorkspaceId)) {
-            console.log('Background sync: Refreshing current workspace');
+            // Background sync: Refreshing current workspace
             await this.refreshSingleWorkspace(AppState.currentWorkspaceId);
         }
     },
@@ -297,20 +297,20 @@ const Cache = {
             return;
         }
 
-        const BATCH_SIZE = 15; // Process 15 workspaces in parallel
+        const batchSize = CONFIG.BATCH_SIZE; // Use global config
         const total = AppState.allWorkspacesCache.length;
         let processed = 0;
 
         UI.showAlert(`Building user cache... 0/${total}`, 'info');
 
-        for (let i = 0; i < total; i += BATCH_SIZE) {
+        for (let i = 0; i < total; i += batchSize) {
             // Check if paused during loop
             if (AppState.cacheBuildingPaused) {
                 UI.showAlert('Cache building paused for data update', 'info');
                 return;
             }
 
-            const batch = AppState.allWorkspacesCache.slice(i, i + BATCH_SIZE);
+            const batch = AppState.allWorkspacesCache.slice(i, i + batchSize);
 
             // Run batch in parallel
             const results = await Promise.allSettled(
@@ -347,8 +347,8 @@ const Cache = {
             }
 
             // Small delay between batches to avoid rate limiting
-            if (i + BATCH_SIZE < total) {
-                await Utils.sleep(200);
+            if (i + batchSize < total) {
+                await Utils.sleep(CONFIG.RATE_LIMIT_DELAY * 2);
             }
         }
 
@@ -462,4 +462,4 @@ function rebuildKnownUsersCache() {
     return Cache.rebuildKnownUsersCache();
 }
 
-console.log('✓ Cache module loaded');
+// Cache module loaded
